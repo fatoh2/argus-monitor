@@ -70,6 +70,14 @@ The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` 
 ### Health
 - `GET /api/health` — returns `{status: "up"}`
 
+### Global ValidationPipe
+The api-service applies a global `ValidationPipe` in `main.ts` with these settings:
+- **whitelist: true** — strips unknown properties from request bodies
+- **forbidNonWhitelisted: true** — throws 400 BadRequest on unknown properties
+- **transform: true** — coerces types (e.g. string to number for query params like `page=2`)
+
+This means all DTOs are enforced at runtime. Sending extra fields, missing required fields, or wrong types returns a 400 error instead of causing a 500.
+
 ### WebSocket Gateway
 - Namespace: `/ws`
 - Auth: JWT token in `auth.token` or `query.token`

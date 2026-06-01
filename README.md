@@ -10,6 +10,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Real-time WebSocket Gateway** — authenticated connections, wallet updates, alert triggers
 - **Chain Management** — admin CRUD for supported blockchain networks
 - **Solana Blockchain Adapter** — Helius RPC integration with rate limiter & circuit breaker
+- **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
 - **Health Checks** — `/api/health` endpoint for all services
 
 ## Architecture
@@ -124,7 +125,7 @@ Returns normalized data with stringified BIGINT values for JSON serialization.
 
 ## API Endpoints
 
-All endpoints are prefixed with `/api`.
+All endpoints are prefixed with `/api`. All request bodies and query parameters are strictly validated — unknown properties are rejected with a 400 BadRequest, and types are automatically coerced (e.g. string query params like `page=2` become numbers).
 
 ### Auth (public)
 
