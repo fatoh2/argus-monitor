@@ -40,6 +40,11 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 
 3.  **Set up Docker Compose**:
     `docker-compose.yml` is provided for local development and includes example services for PostgreSQL and Redis. For production, `docker-compose.prod.yml` is designed to be used with external PostgreSQL and Redis instances. If you wish to manage PostgreSQL and Redis with Docker Compose in production, you can adapt the relevant service definitions from `docker-compose.yml` into `docker-compose.prod.yml`, ensuring you configure appropriate volumes and strong passwords for production use. This distinction is important: `docker-compose.yml` is for quick local setup with integrated databases, while `docker-compose.prod.yml` is for production, assuming external or explicitly configured production-ready databases.
+    **Clarification on `docker-compose.prod.yml`:**
+    *   If you are using external (cloud-managed or separately provisioned) PostgreSQL and Redis, your `docker-compose.prod.yml` should *only* contain the `api-service`, `worker-service`, and `bullmq-dashboard` services.
+    *   If you intend to run PostgreSQL and Redis within the same Docker Compose setup for production, you *must* copy their service definitions from `docker-compose.yml` into `docker-compose.prod.yml`. Ensure you configure persistent volumes for data, strong passwords, and appropriate resource limits for these services.
+    *   The `frontend-service` is typically served by a static file server (like Nginx or Caddy) or a CDN, and is not usually part of the `docker-compose.prod.yml` for the backend services.
+
 
 4.  **Run Migrations and Build Services** (using `docker-compose.prod.yml`):
     Ensure your database and Redis are accessible and properly secured. Then, run the migrations and build the services.
@@ -128,7 +133,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
             expires 30d;
             add_header Cache-Control "public, no-transform";
-            proxy_pass http://localhost:3000;
+            proxy_pass http://api-service:3000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
@@ -146,7 +151,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         }
 
         location / {
-            proxy_pass http://localhost:3000;
+            proxy_pass http://api-service:3000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
