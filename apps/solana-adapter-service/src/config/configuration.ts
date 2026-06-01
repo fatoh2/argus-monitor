@@ -35,5 +35,17 @@ export default () => ({
       process.env.CIRCUIT_BREAKER_TIMEOUT_MS || '30000',
       10,
     ),
+    maxRetries: parseInt(
+      process.env.CIRCUIT_BREAKER_MAX_RETRIES || '3',
+      10,
+    ),
+    baseDelayMs: parseInt(
+      process.env.CIRCUIT_BREAKER_BASE_DELAY_MS || '500',
+      10,
+    ),
+    maxDelayMs: parseInt(
+      process.env.CIRCUIT_BREAKER_MAX_DELAY_MS || '2000',
+      10,
+    ),
   },
 });
