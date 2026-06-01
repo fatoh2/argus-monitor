@@ -93,6 +93,18 @@ For production deployments, it is highly recommended to use SSL to secure commun
         listen 443 ssl http2;
         server_name monitor.example.com;
 
+        # Security Headers
+        add_header X-Frame-Options "SAMEORIGIN";
+        add_header X-Content-Type-Options "nosniff";
+        add_header Referrer-Policy "no-referrer-when-downgrade";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+        add_header X-XSS-Protection "1; mode=block";
+
+        # Disable unnecessary HTTP methods (adjust as needed)
+        if ($request_method !~ ^(GET|POST|HEAD)$) {
+            return 405;
+        }
+
         # SSL Certificates - Paths may vary based on your SSL provider (e.g., Certbot, manual).
         # Ensure your SSL private key is securely stored and protected with appropriate file permissions.
         ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
