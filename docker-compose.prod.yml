@@ -34,6 +34,8 @@ services:
 
   db:
     image: postgres:14-alpine
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -61,6 +63,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    env_file:
+      - .env
     # Add any other necessary production configurations here
     # For example:
     #   restart: always

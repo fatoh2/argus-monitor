@@ -24,7 +24,20 @@ This guide will walk you through the process of self-hosting Argus Monitor.
     
 
 2.  **Configure Environment Variables**:
-    Copy the  file to  and fill in your database and Redis credentials, as well as any other required environment variables.
+    Create a `.env` file in the project root (same directory as `docker-compose.prod.yml`). This file will contain all necessary environment variables for your services. Below is a complete example of the variables you will need to define:
+
+    ```dotenv
+    DATABASE_URL="postgresql://user:password@host:port/database"
+    REDIS_URL="redis://:password@host:port/0"
+    POSTGRES_USER="your_postgres_user"
+    POSTGRES_PASSWORD="your_postgres_password"
+    POSTGRES_DB="your_postgres_db"
+    JWT_SECRET="a_very_long_and_random_secret_key"
+    HELIUS_API_KEY="your_helius_api_key"
+    ```
+
+    Fill in your actual database and Redis credentials, and generate a strong, random `JWT_SECRET`.
+
     
     **Important**:
     *   Ensure  and  are correctly set to point to your PostgreSQL and Redis instances.
