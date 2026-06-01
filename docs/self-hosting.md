@@ -128,7 +128,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
             expires 30d;
             add_header Cache-Control "public, no-transform";
-            proxy_pass http://frontend-service:3000; # Use service name for Docker network
+            proxy_pass http://localhost:3000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
@@ -137,7 +137,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         }
 
         location /api/ {
-            proxy_pass http://api-service:3001; # Use service name for Docker network
+            proxy_pass http://localhost:3001;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
@@ -146,7 +146,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         }
 
         location / {
-            proxy_pass http://frontend-service:3000; # Use service name for Docker network
+            proxy_pass http://localhost:3000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
