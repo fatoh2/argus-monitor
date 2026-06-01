@@ -40,14 +40,14 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 
     
     **Important**:
-    *   Ensure  and  are correctly set to point to your PostgreSQL and Redis instances.
+    *   Ensure `DATABASE_URL` and `REDIS_URL` are correctly set to point to your PostgreSQL and Redis instances.
     *   **Minimum required variables for application startup:** , , , , , .
     *   : Required for any blockchain monitoring features. Obtain one from Helius.
     *   Do not leave critical variables empty or malformed, as this can lead to application startup failures.
     *   Always use strong, random passwords for , , and your database/Redis instances.
     *   **Important**: Change all default placeholder values in  to strong, random passwords and secrets before deploying to production.
     *   Consider using a tool or script to validate  file contents before starting services to catch common misconfigurations early.
-    *   Review the  file itself for secure defaults and clear explanations of each variable.
+    *   Review the `.env` file itself for secure defaults and clear explanations of each variable.
 
 3.  **Set up Docker Compose**:
      is provided for local development and includes example services for PostgreSQL and Redis. For production,  includes services for PostgreSQL and Redis, designed for a self-contained deployment. If you wish to manage PostgreSQL and Redis with Docker Compose in production, you can adapt the relevant service definitions from  into , ensuring you configure appropriate volumes and strong passwords for production use. This distinction is important:  is for quick local setup with integrated databases, while  is for production, assuming external or explicitly configured production-ready databases.
