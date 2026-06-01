@@ -4,7 +4,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 
 ## Prerequisites
 - Docker and Docker Compose installed
-- Sufficient system resources (CPU, RAM, Disk Space). For a small deployment (e.g., 1-5 monitors), a VPS with 2 vCPU and 4GB RAM is a good starting point. Scale up as needed.
+- Sufficient system resources (CPU, RAM, Disk Space). For a small deployment (e.g., 1-5 monitors), a VPS with 2 vCPU and 4GB RAM is a good starting point. Scale up as needed for larger numbers of monitors or checks.
 - A PostgreSQL database instance (can be run via Docker Compose or externally).
 - A Redis instance (can be run via Docker Compose or externally).
 - A domain name configured to point to your server's IP address (for SSL).
@@ -28,6 +28,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
     *   Do not leave critical variables empty or malformed, as this can lead to application startup failures.
     *   Always use strong, random passwords for `JWT_SECRET`, `BULLMQ_UI_PASSWORD`, and your database/Redis instances.
     *   Consider using a tool or script to validate `.env` file contents before starting services to catch common misconfigurations early.
+    *   Review the `.env.example` file itself for secure defaults and clear explanations of each variable.
 
 3.  **Set up Docker Compose**:
     We provide `docker-compose.yml` for local development, which includes example services for PostgreSQL and Redis.
@@ -39,7 +40,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
     docker-compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deploy
     docker-compose -f docker-compose.prod.yml build
     ```
-    **Troubleshooting Migrations**: If `prisma migrate deploy` fails, check your `DATABASE_URL` in `.env` for correctness, ensure your PostgreSQL database is running and accessible, and verify credentials. Review the output for specific error messages.
+    **Troubleshooting Migrations**: If `prisma migrate deploy` fails, check your `DATABASE_URL` in `.env` for correctness, ensure your PostgreSQL database is running and accessible (e.g., check firewall rules, database service status), and verify credentials. Review the output for specific error messages.
 
 5.  **Start Argus Monitor Services** (using `docker-compose.prod.yml`):
     ```bash
@@ -79,7 +80,9 @@ For production deployments, it is highly recommended to use SSL to secure commun
         server_name monitor.example.com;
 
         # SSL Certificates - Paths may vary based on your SSL provider (e.g., Certbot, manual).
+
         # Ensure your SSL private key is securely stored and protected with appropriate file permissions.
+
         ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/monitor.example.com/privkey.pem;
 
@@ -95,12 +98,13 @@ For production deployments, it is highly recommended to use SSL to secure commun
         limit_req_zone $binary_remote_addr zone=api_rate_limit:10m rate=1r/s;
 
         # Disable unnecessary HTTP methods (e.g., only allow GET, POST, HEAD)
-        # if ($request_method !~ ^(GET|POST|HEAD)$) {
-        #     return 405; # Method Not Allowed
-        # }
+        if ($request_method !~ ^(GET|POST|HEAD)$) {
+            return 405; # Method Not Allowed
+        }
 
         location / {
             # Use Docker service names for proxy_pass if Nginx is on the same host as Docker Compose
+            # The API should ONLY be accessible via the reverse proxy in production.
             proxy_pass http://frontend-service:3000; # Replace with your frontend service name and port
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -115,33 +119,49 @@ For production deployments, it is highly recommended to use SSL to secure commun
         location /api {
             limit_req zone=api_rate_limit burst=5 nodelay; # Apply rate limiting
             # Use Docker service names for proxy_pass if Nginx is on the same host as Docker Compose
+            # The API should ONLY be accessible via the reverse proxy in production.
             proxy_pass http://api-service:3001; # Replace with your API service name and port
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';
             proxy_set_header Host $host;
             proxy_cache_bypass $http_upgrade;
-            # The API service should only be accessible via this reverse proxy.
-            # Ensure direct access to the API service port (e.g., 3001) is blocked by a firewall.
         }
     }
     ```
-    **Note**:
-    *   Replace `frontend-service:3000` and `api-service:3001` with the actual service names and ports defined in your `docker-compose.prod.yml` file. You can find service names under the `services` key in your `docker-compose.prod.yml`.
-    *   If Nginx is running outside the Docker network (e.g., directly on the host and your services are in Docker), you might need to use the host's IP address or configure Docker to expose ports to the host network.
-    *   **Securing Redis**: Ensure your Redis instance is password-protected and configured to only listen on internal network interfaces or `localhost` to prevent public exposure. Refer to Redis documentation for detailed security best practices.
-    *   **Database Security**: Always use strong, unique credentials for your PostgreSQL database and ensure it's not publicly accessible.
+    **Note on `proxy_pass` targets**: If Nginx is running on the same host as your Docker Compose services, you should use the Docker service names (e.g., `http://frontend-service:3000`) rather than `localhost`. You can find the service names in your `docker-compose.prod.yml` file.
+
+3.  **Obtain SSL Certificates**: Use Certbot or another method to obtain and install SSL certificates for your domain.
+    ```bash
+    sudo certbot --nginx -d monitor.example.com
+    ```
+
+4.  **Test Nginx Configuration**:
+    ```bash
+    sudo nginx -t
+    sudo systemctl reload nginx
+    ```
 
 ## Testing and Troubleshooting
 
--   After starting the services, navigate to your configured domain (`monitor.example.com`). You should see the Argus Monitor frontend.
--   Check Docker logs for any errors: `docker-compose -f docker-compose.prod.yml logs -f`
--   Verify that your database and Redis instances are running and accessible from the Argus Monitor services.
--   **Common Connection Issues**: If you encounter connection issues to PostgreSQL or Redis, check:
-    *   Firewall rules on your server and database/Redis host.
-    *   Correctness of `DATABASE_URL` and `REDIS_URL` in your `.env` file.
-    *   Whether the database/Redis services are actually running.
+-   **Verify Services**: Check Docker logs to ensure all services are running without errors:
+    ```bash
+    docker-compose -f docker-compose.prod.yml logs
+    ```
+-   **Check Connectivity**: Ensure you can access the Argus Monitor frontend in your browser at your configured domain.
+-   **Common Issues**:
+    *   **Firewall**: Ensure ports 80 and 443 are open on your server.
+    *   **Environment Variables**: Double-check your `.env` file for any typos or incorrect values.
+    *   **Database/Redis Connectivity**: Verify that your Argus Monitor services can connect to your PostgreSQL and Redis instances. Check credentials, hostnames, and port numbers.
+    *   **Nginx Configuration**: Use `sudo nginx -t` to check for syntax errors and `sudo systemctl status nginx` to ensure Nginx is running.
 
-## Done When
+## "Done when" criteria
 
-This guide aims to provide a clear and efficient path for users to self-host Argus Monitor successfully.
+This guide aims to provide a clear and efficient path for a user to self-host Argus Monitor. A user should be able to follow these instructions to successfully deploy the application.
+
+## Performance Considerations
+
+-   **Resource Allocation**: As the number of monitors and checks increases, you may need to scale up your server's CPU, RAM, and disk resources.
+-   **Nginx Caching**: The provided Nginx configuration includes basic caching for static assets. For higher traffic, consider more advanced caching strategies.
+-   **Load Balancing**: For very high availability or large-scale deployments, consider setting up multiple instances of the API and frontend services behind a load balancer.
+-   **Database/Redis Tuning**: If you experience performance bottlenecks, investigate performance tuning options for your PostgreSQL and Redis instances.
