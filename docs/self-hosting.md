@@ -50,7 +50,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 4.  **Run Migrations and Build Services** (using `docker-compose.prod.yml`):
     Ensure your database and Redis are accessible and properly secured. Then, run the migrations and build the services.
     ```bash
-    docker-compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deploy
+    docker-compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deployi-service npx prisma migrate deploy
     docker-compose -f docker-compose.prod.yml build
     ```
     **Troubleshooting Migrations**: If `prisma migrate deploy` fails, carefully review the error messages. Common causes include incorrect `DATABASE_URL` in `.env`, the PostgreSQL database not running or being inaccessible (e.g., due to firewall rules, incorrect host/port, or service not started), or invalid database credentials. Ensure your database is fully initialized and accepting connections.
