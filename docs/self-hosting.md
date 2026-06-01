@@ -42,3 +42,8 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 
 3.  **Set up Docker Compose**:
     `docker-compose.yml` is provided for local development and includes example services for PostgreSQL and Redis. For production, `docker-compose.prod.yml` is designed to be used with external PostgreSQL and Redis instances. If you wish to manage PostgreSQL and Redis with Docker Compose in production, you can adapt the relevant service definitions from `docker-compose.yml` into `docker-compose.prod.yml`, ensuring you configure appropriate volumes and strong passwords for production use. This distinction is important: `docker-compose.yml` is for quick local setup with integrated databases, while `docker-compose.prod.yml` is for production, assuming external or explicitly configured production-ready databases.
+4.  **Run Database Migrations**:
+    Before starting the application, you need to run database migrations to set up the schema.
+    ```bash
+    docker-compose -f docker-compose.prod.yml run --rm api-service npm run start:prod # This assumes migrations run on startup. If not, replace with your specific migration command (e.g., npx typeorm migration:run).
+    ```
