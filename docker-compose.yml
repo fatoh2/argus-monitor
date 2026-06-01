@@ -1,0 +1,37 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: argus
+      POSTGRES_USER: argus
+      POSTGRES_PASSWORD: argus
+  redis:
+    image: redis:7
+  api-service:
+    build: ./apps/api-service
+    ports: [3000:3000]
+    depends_on: [postgres, redis]
+  chain-indexer-service:
+    build: ./apps/chain-indexer-service
+    depends_on: [postgres, redis]
+  solana-adapter-service:
+    build: ./apps/solana-adapter-service
+    depends_on: [postgres, redis]
+  alert-service:
+    build: ./apps/alert-service
+    depends_on: [postgres, redis]
+  notification-service:
+    build: ./apps/notification-service
+    depends_on: [postgres, redis]
+  rpc-monitor-service:
+    build: ./apps/rpc-monitor-service
+    depends_on: [postgres, redis]
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  argus-net:
+    driver: bridge

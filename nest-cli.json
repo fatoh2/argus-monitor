@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/@nestjs/cli/lib/schemas/nest-cli-schema.json",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/api-service/src",
+  "entryFile": "main.ts",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
