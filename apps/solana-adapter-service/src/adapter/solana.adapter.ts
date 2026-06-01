@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Connection,
@@ -15,17 +15,20 @@ import {
   RpcHealthResult,
 } from '@argus/shared-types';
 import { RateLimiterService } from '../rate-limiter/rate-limiter.service';
-import { CircuitBreakerService } from '../circuit-breaker/circuit-breaker.service';
+import {
+  CircuitBreakerService,
+} from '../circuit-breaker/circuit-breaker.service';
 
 /**
  * Solana chain adapter using Helius RPC.
  * Implements the ChainAdapter interface for Solana blockchain.
  */
 @Injectable()
-export class SolanaAdapter implements ChainAdapter {
+export class SolanaAdapter implements ChainAdapter, OnModuleInit {
   private readonly logger = new Logger(SolanaAdapter.name);
   private connection: Connection;
   private readonly heliusApiKey: string;
+  private readonly rpcUrl: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -33,12 +36,24 @@ export class SolanaAdapter implements ChainAdapter {
     private readonly circuitBreaker: CircuitBreakerService,
   ) {
     this.heliusApiKey = this.configService.get<string>('helius.apiKey', '');
-    const rpcUrl = this.configService.get<string>(
+    this.rpcUrl = this.configService.get<string>(
       'helius.rpcUrl',
       `https://mainnet.helius-rpc.com/?api-key=${this.heliusApiKey}`,
     );
-    this.connection = new Connection(rpcUrl, {
+    this.connection = new Connection(this.rpcUrl, {
       commitment: 'confirmed',
+    });
+  }
+
+  /**
+   * Subscribe to circuit breaker degraded events on init.
+   */
+  onModuleInit(): void {
+    this.circuitBreaker.degraded$.subscribe((event) => {
+      this.logger.warn(
+        `[${event.endpoint}] RPC degraded: circuit=${event.circuitState}, ` +
+          `failures=${event.failureCount}, error=${event.errorMessage}`,
+      );
     });
   }
 
@@ -52,13 +67,18 @@ export class SolanaAdapter implements ChainAdapter {
    */
   async getNativeBalance(address: string): Promise<NativeBalance> {
     const publicKey = this.validateAddress(address);
+    const cacheKey = `balance:${address}`;
 
-    const balance = await this.circuitBreaker.execute(async () => {
-      return this.rateLimiter.execute(async () => {
-        const lamports = await this.connection.getBalance(publicKey);
-        return lamports;
-      });
-    });
+    const balance = await this.circuitBreaker.execute<number>(
+      async () => {
+        return this.rateLimiter.execute(async () => {
+          const lamports = await this.connection.getBalance(publicKey);
+          return lamports;
+        });
+      },
+      this.rpcUrl,
+      cacheKey,
+    );
 
     return {
       address,
@@ -73,16 +93,40 @@ export class SolanaAdapter implements ChainAdapter {
    */
   async getTokenBalances(address: string): Promise<TokenBalance[]> {
     const publicKey = this.validateAddress(address);
+    const cacheKey = `tokens:${address}`;
 
-    const tokenAccounts = await this.circuitBreaker.execute(async () => {
-      return this.rateLimiter.execute(async () => {
-        return this.connection.getParsedTokenAccountsByOwner(publicKey, {
-          programId: new PublicKey(
-            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-          ),
+    const tokenAccounts = await this.circuitBreaker.execute<{
+      value: Array<{
+        pubkey: PublicKey;
+        account: {
+          data: {
+            parsed: {
+              info: {
+                mint: string;
+                tokenAmount: {
+                  amount: string;
+                  decimals: number;
+                  uiAmount: number | null;
+                };
+                tokenSymbol?: string;
+              };
+            };
+          };
+        };
+      }>;
+    }>(
+      async () => {
+        return this.rateLimiter.execute(async () => {
+          return this.connection.getParsedTokenAccountsByOwner(publicKey, {
+            programId: new PublicKey(
+              'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+            ),
+          });
         });
-      });
-    });
+      },
+      this.rpcUrl,
+      cacheKey,
+    );
 
     const balances: TokenBalance[] = [];
 
@@ -117,14 +161,21 @@ export class SolanaAdapter implements ChainAdapter {
     limit: number = 20,
   ): Promise<Transaction[]> {
     const publicKey = this.validateAddress(address);
+    const cacheKey = `tx:${address}:${limit}`;
 
-    const signatures = await this.circuitBreaker.execute(async () => {
-      return this.rateLimiter.execute(async () => {
-        return this.connection.getSignaturesForAddress(publicKey, {
-          limit,
+    const signatures = await this.circuitBreaker.execute<
+      Array<{ signature: string; slot: number }>
+    >(
+      async () => {
+        return this.rateLimiter.execute(async () => {
+          return this.connection.getSignaturesForAddress(publicKey, {
+            limit,
+          });
         });
-      });
-    });
+      },
+      this.rpcUrl,
+      cacheKey,
+    );
 
     if (signatures.length === 0) {
       return [];
@@ -135,13 +186,19 @@ export class SolanaAdapter implements ChainAdapter {
       (s) => s.signature,
     );
 
-    const transactions = await this.circuitBreaker.execute(async () => {
-      return this.rateLimiter.execute(async () => {
-        return this.connection.getParsedTransactions(txSignatures, {
-          maxSupportedTransactionVersion: 0,
+    const transactions = await this.circuitBreaker.execute<
+      Array<ParsedTransactionWithMeta | null>
+    >(
+      async () => {
+        return this.rateLimiter.execute(async () => {
+          return this.connection.getParsedTransactions(txSignatures, {
+            maxSupportedTransactionVersion: 0,
+          });
         });
-      });
-    });
+      },
+      this.rpcUrl,
+      `${cacheKey}:parsed`,
+    );
 
     const result: Transaction[] = [];
 
