@@ -32,8 +32,11 @@ services:
   db:
     image: postgres:14-alpine
     env_file:
-      - .env
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      - .env.production
+    environment:
+      POSTGRES_USER: 
+      POSTGRES_PASSWORD: 
+      POSTGRES_DB: 
     volumes:
       - db_data:/var/lib/postgresql/data
     # Add any other necessary production configurations here
@@ -45,7 +48,7 @@ services:
     #         cpus: "0.2"
     #         memory: "256M"
     #   healthcheck:
-    #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+    #     test: ["CMD-SHELL", "pg_isready -U  -d "]
     #     interval: 10s
     #     timeout: 5s
     #     retries: 5
@@ -56,24 +59,15 @@ services:
     #       max-file: "5"
 
   redis:
-    env_file:
-      - .env
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data:/data
     image: redis:7-alpine
     env_file:
-      - .env
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+      - .env.production
+    command: redis-server --requirepass 
     volumes:
       - redis_data:/data
-    env_file:
-      - .env
     # Add any other necessary production configurations here
     # For example:
     #   restart: always
-    #   volumes:
-    #     - redis_data:/data
     #   ports:
     #     - "6379:6379" # Only expose if absolutely necessary and secured
 
