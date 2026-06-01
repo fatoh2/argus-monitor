@@ -18,6 +18,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 *   **Regularly update dependencies**: Keep your Docker images and system packages up-to-date to mitigate known vulnerabilities.
 *   **Monitor logs**: Regularly review application and server logs for suspicious activity.
 *   **API Endpoint Security**: The API service should only be accessible via the reverse proxy to ensure all security measures (SSL, rate limiting, etc.) are applied. Do not expose the API service directly to the public internet.
+*   **BullMQ Dashboard Security**: The `bullmq-dashboard` service is a management interface. It should also be protected by a reverse proxy and not exposed directly to the public internet, even with password protection. Exposing it directly increases the attack surface and risk of data exposure or unauthorized control.
 
 1.  **Clone the repository**:
     ```bash
