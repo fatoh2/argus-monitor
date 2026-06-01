@@ -26,11 +26,90 @@ apps/
   rpc-monitor-service/      RPC health checks + circuit breaker
 packages/
   chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
-  shared-types/             NormalizedTransaction, ChainAdapter interface, queue names
-  ui/                       Shared React components
+  shared-types/             Enums, queue names, job payload types
 k8s/apps/                   Helm charts for all services
 docker-compose.yml          Local dev — all services + PostgreSQL + Redis
 docker-compose.prod.yml     Self-hosted production
+```
+
+## API Service Details
+
+The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` prefix.
+
+### Auth (public)
+- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds)
+- `POST /api/auth/login` — login, returns `{accessToken, refreshToken, user}`
+- `POST /api/auth/refresh` — refresh access token with `{refreshToken}`
+- `POST /api/auth/me` — get current user profile (JWT protected)
+
+### Wallets (JWT required, JwtAuthGuard)
+- `POST /api/wallets` — add wallet `{address, chain: "SOLANA"|"ETHEREUM"}`
+- `GET /api/wallets` — list user's wallets
+- `GET /api/wallets/:id` — get single wallet (UUID)
+- `DELETE /api/wallets/:id` — delete wallet
+
+### Alert Rules (JWT required, JwtAuthGuard)
+- `POST /api/alert-rules` — create rule `{walletId, chain, type, threshold?}`
+- `GET /api/alert-rules` — list user's rules
+- `GET /api/alert-rules/:id` — get single rule (UUID)
+- `DELETE /api/alert-rules/:id` — delete rule
+
+**Alert rule types:** `balance_low`, `balance_high`, `transaction_from`, `transaction_to`
+
+### Chains (admin — no auth guard yet)
+- `POST /api/chains` — create chain `{name, rpcUrl}`
+- `GET /api/chains` — list all chains
+- `GET /api/chains/:id` — get single chain (UUID)
+- `DELETE /api/chains/:id` — delete chain
+
+### Health
+- `GET /api/health` — returns `{status: "up"}`
+
+### WebSocket Gateway
+- Namespace: `/ws`
+- Auth: JWT token in `auth.token` or `query.token`
+- Events: `subscribe-wallet`, `unsubscribe-wallet` (client→server)
+- Emits: `wallet_update`, `alert_triggered`, `connected` (server→client)
+
+## Prisma Schema (api-service)
+
+```prisma
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  wallets      Wallet[]
+  alertRules   AlertRule[]
+}
+
+model Wallet {
+  id         String      @id @default(uuid())
+  address    String      @unique
+  userId     String
+  chain      String      // "SOLANA" or "ETHEREUM"
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alertRules AlertRule[]
+  @@index([userId])
+}
+
+model AlertRule {
+  id        String   @id @default(uuid())
+  userId    String
+  walletId  String
+  chain     String
+  type      String
+  threshold String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([walletId])
+}
+
+model Chain {
+  id     String @id @default(uuid())
+  name   String @unique
+  rpcUrl String
+}
 ```
 
 ## Critical Data Rules
@@ -45,7 +124,7 @@ docker-compose.prod.yml     Self-hosted production
 
 ## Service Communication Rules
 - Services communicate via **BullMQ queues only** — no direct HTTP between services
-- Queue names are defined in `packages/shared-types/src/queues.ts` — never hardcode
+- Queue names are defined in `packages/shared-types/src/queues/index.ts` — never hardcode
 - The chain-indexer pushes jobs → solana-adapter consumes them
 - solana-adapter writes to DB → alert-service reads via BullMQ or Postgres LISTEN
 
@@ -63,7 +142,11 @@ docker-compose.prod.yml     Self-hosted production
 
 ## Auth (MVP)
 Auth is inside `api-service` using NestJS Guards + JWT + Passport.
-Do NOT create a separate auth-service until explicitly instructed.
+- JWT strategy: `passport-jwt` with Bearer token extraction
+- Global `JwtAuthGuard` applied per-controller
+- Passwords: bcrypt with 12 salt rounds
+- Access token: configurable expiry (default 1h), refresh token: 7d
+- Do NOT create a separate auth-service until explicitly instructed.
 
 ## PR Format
 ```
