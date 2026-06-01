@@ -72,7 +72,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
 
         location / {
             return 301 https://$host$request_uri;
-        }
+        }\
     }
 
     server {
@@ -80,9 +80,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         server_name monitor.example.com;
 
         # SSL Certificates - Paths may vary based on your SSL provider (e.g., Certbot, manual).
-
         # Ensure your SSL private key is securely stored and protected with appropriate file permissions.
-
         ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/monitor.example.com/privkey.pem;
 
@@ -117,9 +115,7 @@ For production deployments, it is highly recommended to use SSL to secure commun
         }
 
         location /api {
-            limit_req zone=api_rate_limit burst=5 nodelay; # Apply rate limiting
-            # Use Docker service names for proxy_pass if Nginx is on the same host as Docker Compose
-            # The API should ONLY be accessible via the reverse proxy in production.
+            limit_req zone=api_rate_limit burst=5 nodelay; # Apply rate limit to API endpoint
             proxy_pass http://api-service:3001; # Replace with your API service name and port
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -129,39 +125,28 @@ For production deployments, it is highly recommended to use SSL to secure commun
         }
     }
     ```
-    **Note on `proxy_pass` targets**: If Nginx is running on the same host as your Docker Compose services, you should use the Docker service names (e.g., `http://frontend-service:3000`) rather than `localhost`. You can find the service names in your `docker-compose.prod.yml` file.
 
-3.  **Obtain SSL Certificates**: Use Certbot or another method to obtain and install SSL certificates for your domain.
+3.  **Enable the Nginx configuration**:
     ```bash
-    sudo certbot --nginx -d monitor.example.com
-    ```
-
-4.  **Test Nginx Configuration**:
-    ```bash
-    sudo nginx -t
-    sudo systemctl reload nginx
+    sudo ln -s /etc/nginx/sites-available/argus-monitor /etc/nginx/sites-enabled/
+    sudo nginx -t # Test Nginx configuration
+    sudo systemctl restart nginx
     ```
 
 ## Testing and Troubleshooting
 
--   **Verify Services**: Check Docker logs to ensure all services are running without errors:
+*   **Verify Services**: Check Docker logs to ensure all services are running without errors:
     ```bash
     docker-compose -f docker-compose.prod.yml logs
     ```
--   **Check Connectivity**: Ensure you can access the Argus Monitor frontend in your browser at your configured domain.
--   **Common Issues**:
-    *   **Firewall**: Ensure ports 80 and 443 are open on your server.
-    *   **Environment Variables**: Double-check your `.env` file for any typos or incorrect values.
-    *   **Database/Redis Connectivity**: Verify that your Argus Monitor services can connect to your PostgreSQL and Redis instances. Check credentials, hostnames, and port numbers.
-    *   **Nginx Configuration**: Use `sudo nginx -t` to check for syntax errors and `sudo systemctl status nginx` to ensure Nginx is running.
+*   **Access Application**: Open your browser and navigate to your configured domain (e.g., `https://monitor.example.com`).
+*   **Common Issues**:
+    *   **Port Conflicts**: Ensure no other services are using ports 80 or 443 on your host.
+    *   **Firewall**: Open ports 80 and 443 in your server's firewall.
+    *   **Incorrect Environment Variables**: Double-check your `.env` file for typos or incorrect values.
+    *   **Database/Redis Connectivity**: Ensure your database and Redis instances are running and accessible from the Docker network. Check network configurations and credentials. If using external services, verify their host/IP and port are correct and firewalls allow connections.
+    *   **Nginx Configuration Errors**: Use `sudo nginx -t` to test your Nginx configuration for syntax errors.
 
-## "Done when" criteria
+## Done when
 
-This guide aims to provide a clear and efficient path for a user to self-host Argus Monitor. A user should be able to follow these instructions to successfully deploy the application.
-
-## Performance Considerations
-
--   **Resource Allocation**: As the number of monitors and checks increases, you may need to scale up your server's CPU, RAM, and disk resources.
--   **Nginx Caching**: The provided Nginx configuration includes basic caching for static assets. For higher traffic, consider more advanced caching strategies.
--   **Load Balancing**: For very high availability or large-scale deployments, consider setting up multiple instances of the API and frontend services behind a load balancer.
--   **Database/Redis Tuning**: If you experience performance bottlenecks, investigate performance tuning options for your PostgreSQL and Redis instances.
+The guide provides a clear and efficient path for a user to self-host Argus Monitor, covering all essential setup, configuration, and troubleshooting steps.
