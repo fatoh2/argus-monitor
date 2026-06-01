@@ -45,5 +45,5 @@ This guide will walk you through the process of self-hosting Argus Monitor.
 4.  **Run Database Migrations**:
     Before starting the application, you need to run database migrations to set up the schema.
     ```bash
-    docker-compose -f docker-compose.prod.yml run --rm api-service npm run start:prod # This assumes migrations run on startup. If not, replace with your specific migration command (e.g., npx typeorm migration:run).
+    docker-compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deploy
     ```
