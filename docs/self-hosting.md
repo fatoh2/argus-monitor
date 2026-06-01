@@ -39,7 +39,7 @@ This guide will walk you through the process of self-hosting Argus Monitor.
     *   Review the `.env.example` file itself for secure defaults and clear explanations of each variable.
 
 3.  **Set up Docker Compose**:
-    `docker-compose.yml` is provided for local development and includes example services for PostgreSQL and Redis. For production, `docker-compose.prod.yml` is designed to be used with external PostgreSQL and Redis instances. If you wish to manage PostgreSQL and Redis with Docker Compose in production, you can adapt the relevant service definitions from `docker-compose.yml` into `docker-compose.prod.yml`, ensuring you configure appropriate volumes and strong passwords for production use.
+    `docker-compose.yml` is provided for local development and includes example services for PostgreSQL and Redis. For production, `docker-compose.prod.yml` is designed to be used with external PostgreSQL and Redis instances. If you wish to manage PostgreSQL and Redis with Docker Compose in production, you can adapt the relevant service definitions from `docker-compose.yml` into `docker-compose.prod.yml`, ensuring you configure appropriate volumes and strong passwords for production use. This distinction is important: `docker-compose.yml` is for quick local setup with integrated databases, while `docker-compose.prod.yml` is for production, assuming external or explicitly configured production-ready databases.
 
 4.  **Run Migrations and Build Services** (using `docker-compose.prod.yml`):
     Ensure your database and Redis are accessible and properly secured. Then, run the migrations and build the services.
@@ -73,12 +73,19 @@ For production deployments, it is highly recommended to use SSL to secure commun
 2.  **Configure Nginx**: Create a new Nginx configuration file (e.g., `/etc/nginx/sites-available/argus-monitor`) and link it to `sites-enabled`.
 
     ```nginx
+    # Rate limiting to prevent DoS attacks (configure as needed)
+    # Define a zone for rate limiting. 1r/s means 1 request per second.
+    # Adjust 'zone=mylimit:10m' (10MB memory for storing states) and 'rate=1r/s' as appropriate.
+    # burst=5 allows for 5 requests over the limit before requests are rejected.
+    # nodelay means requests are processed immediately if within burst, otherwise delayed.
+    limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=1r/s;
+
     server {
         listen 80;
         server_name monitor.example.com;
 
         location / {
-            return 301 https://$host$request_uri;
+            return 301 https://\$host\$request_uri;
         }
     }
 
@@ -97,62 +104,68 @@ For production deployments, it is highly recommended to use SSL to secure commun
         add_header Referrer-Policy "no-referrer-when-downgrade";
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
 
-        # Rate limiting to prevent DoS attacks (configure as needed)
-        # limit_req_zone $binary_remote_addr zone=mylimit:10m rate=5r/s;
-        # limit_req zone=mylimit burst=10 nodelay;
+        # Disable unnecessary HTTP methods to reduce attack surface
+        if (\$request_method !~ ^(GET|POST|HEAD)$) {
+            return 405;
+        }
 
-        # Disable unnecessary HTTP methods
-        # if ($request_method !~ ^(GET|POST|HEAD)$) {
-        #     return 405;
-        # }
+        # Apply rate limiting
+        limit_req zone=mylimit burst=5 nodelay;
+
+        # Basic Nginx caching for static assets (adjust as needed)
+        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 30d;
+            add_header Cache-Control "public, no-transform";
+            proxy_pass http://frontend-service:3000; # Use service name for Docker network
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host \$host;
+            proxy_cache_bypass \$http_upgrade;
+        }
 
         location /api/ {
-            proxy_pass http://api-service:3001/; # Use Docker service name
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            # Basic Nginx caching for API responses (adjust as needed)
-            # proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=api_cache:10m inactive=60m;
-            # proxy_cache_key "$scheme$request_method$host$request_uri";
-            # proxy_cache api_cache;
-            # proxy_cache_valid 200 302 10m;
-            # proxy_cache_valid 404 1m;
+            proxy_pass http://api-service:3001; # Use service name for Docker network
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host \$host;
+            proxy_cache_bypass \$http_upgrade;
         }
 
         location / {
-            proxy_pass http://frontend-service:3000/; # Use Docker service name
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            # Basic Nginx caching for static assets (adjust as needed)
-            # expires 1y;
-            # add_header Cache-Control "public";
+            proxy_pass http://frontend-service:3000; # Use service name for Docker network
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host \$host;
+            proxy_cache_bypass \$http_upgrade;
         }
     }
     ```
-    **Note on `proxy_pass` targets**: When Nginx is running on the same host as your Docker Compose services, and Nginx is *not* part of the same Docker network, you might need to use `localhost` or the host's IP address if the Docker services are exposed on the host network. However, if Nginx is within the same Docker network (e.g., as another service in `docker-compose.prod.yml`), you should use the Docker service names (e.g., `http://api-service:3001`). The example above assumes Nginx is on the same host and can resolve Docker service names, or that you will adjust it to `localhost` if necessary.
 
-3.  **Test Nginx Configuration**:
+3.  **Test Nginx configuration and reload**:
     ```bash
     sudo nginx -t
-    ```
-
-4.  **Reload Nginx**:
-    ```bash
     sudo systemctl reload nginx
     ```
+    **Note on `proxy_pass` targets**: When running Nginx and your Argus Monitor services within the same Docker network (e.g., via `docker-compose`), you should use the service names defined in your `docker-compose.prod.yml` (e.g., `frontend-service`, `api-service`) instead of `localhost` or specific IP addresses. If Nginx is running outside the Docker network, you would need to use the host's IP address and the exposed ports, or configure a separate Docker network for Nginx to communicate with the services.
 
 ## Testing and Troubleshooting
 
--   **Verify Services**: Ensure all Docker containers are running: `docker-compose -f docker-compose.prod.yml ps`.
--   **Check Logs**: Use `docker-compose -f docker-compose.prod.yml logs -f` to view application logs for any errors.
--   **Network Connectivity**: Confirm your server's firewall allows incoming traffic on ports 80 and 443.
--   **Database/Redis Connectivity**: If services fail to start, double-check your `DATABASE_URL` and `REDIS_URL` in `.env` and ensure your database/Redis instances are running and accessible from the Docker containers.
--   **Performance Tuning**: For high-traffic deployments, consider optimizing your PostgreSQL and Redis configurations. Consult their respective documentation for performance tuning guides.
--   **Load Balancing**: For very high availability or traffic, consider deploying multiple instances of the API and frontend services behind a load balancer.
+-   **Verify Services**: After starting, check Docker logs to ensure all services are running without errors:
+    ```bash
+    docker-compose -f docker-compose.prod.yml logs
+    ```
+-   **Access Application**: Open your browser and navigate to `https://monitor.example.com` (replace with your domain). You should see the Argus Monitor frontend.
+-   **Check API**: Verify that the API endpoints are accessible and functioning correctly.
+-   **Common Issues**:
+    *   **Port Conflicts**: Ensure no other services are using ports 80, 443, 3000, or 3001 on your host.
+    *   **Firewall**: Check your server's firewall (e.g., `ufw`) to ensure ports 80 and 443 are open.
+    *   **Environment Variables**: Double-check your `.env` file for any typos or incorrect values, especially `DATABASE_URL` and `REDIS_URL`.
+    *   **Docker Network**: If services cannot communicate, inspect your Docker network configuration (`docker network ls`, `docker inspect <network_name>`).
+    *   **SSL Issues**: If you encounter SSL errors, verify your Nginx configuration, certificate paths, and ensure your domain's DNS records are correctly pointing to your server.
 
 ## "Done when" criteria
 
-This guide aims to provide a clear, efficient, and secure path for users to self-host Argus Monitor.
+The guide provides a clear and efficient path for a user to self-host Argus Monitor, covering all necessary steps from prerequisites to SSL configuration and troubleshooting.
