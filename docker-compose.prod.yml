@@ -6,70 +6,29 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env.production
+      - .env
     depends_on:
       - db
       - redis
-    # Add any other necessary production configurations here
-    # For example:
-    #   restart: always
-    #   deploy:
-    #     resources:
-    #       limits:
-    #         cpus: "0.5"
-    #         memory: "1024M"
-    #   healthcheck:
-    #     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-    #     interval: 30s
-    #     timeout: 10s
-    #     retries: 3
-    #   logging:
-    #     driver: "json-file"
-    #     options:
-    #       max-size: "10m"
-    #       max-file: "5"
 
   db:
     image: postgres:14-alpine
     env_file:
-      - .env.production
+      - .env
     environment:
       POSTGRES_USER: 
       POSTGRES_PASSWORD: 
       POSTGRES_DB: 
     volumes:
       - db_data:/var/lib/postgresql/data
-    # Add any other necessary production configurations here
-    # For example:
-    #   restart: always
-    #   deploy:
-    #     resources:
-    #       limits:
-    #         cpus: "0.2"
-    #         memory: "256M"
-    #   healthcheck:
-    #     test: ["CMD-SHELL", "pg_isready -U  -d "]
-    #     interval: 10s
-    #     timeout: 5s
-    #     retries: 5
-    #   logging:
-    #     driver: "json-file"
-    #     options:
-    #       max-size: "10m"
-    #       max-file: "5"
 
   redis:
     image: redis:7-alpine
     env_file:
-      - .env.production
+      - .env
     command: redis-server --requirepass 
     volumes:
       - redis_data:/data
-    # Add any other necessary production configurations here
-    # For example:
-    #   restart: always
-    #   ports:
-    #     - "6379:6379" # Only expose if absolutely necessary and secured
 
 volumes:
   db_data:
