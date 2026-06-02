@@ -194,6 +194,11 @@ DATABASE_URL=postgresql://argus:<password>@postgres:5432/argus_monitor
 # Redis
 REDIS_URL=redis://redis:6379
 
+# API Service
+# PORT is read by the NestJS app at runtime. Each service in docker-compose
+# overrides this via its own *_SERVICE_PORT variable.
+PORT=3000
+
 # JWT
 JWT_SECRET=<strong-random-secret>
 JWT_EXPIRATION_TIME=60s
