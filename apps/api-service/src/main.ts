@@ -4,6 +4,18 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
+function parseAllowedOrigins(): string[] | string {
+  const raw = process.env.ALLOWED_ORIGINS;
+  if (!raw || raw.trim() === '') {
+    // Fallback: allow all origins in development, block all in production
+    return process.env.NODE_ENV === 'production' ? [] : '*';
+  }
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -15,7 +27,7 @@ async function bootstrap() {
 
   // Enable CORS for frontend — locked down to allowed origins
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') ?? [],
+    origin: parseAllowedOrigins(),
     credentials: true,
   });
 
