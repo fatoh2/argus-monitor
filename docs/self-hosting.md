@@ -207,7 +207,7 @@ JWT_REFRESH_EXPIRATION=7d
 
 # Helius (Solana)
 HELIUS_API_KEY=<your-helius-api-key>
-HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<your-helius-api-key>
+HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
 
 # Telegram (notifications)
 TELEGRAM_BOT_TOKEN=<your-bot-token>
