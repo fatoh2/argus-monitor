@@ -26,6 +26,7 @@ apps/
       mocks/                MSW handlers for E2E testing
       pages/                Page components (Login, Register, Dashboard)
       services/             API client and WebSocket service
+    jest.config.cjs         Jest config — excludes e2e dir from Jest
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
@@ -62,6 +63,12 @@ npm run test:cov      # with coverage (70% threshold)
 npm run test:e2e      # E2E tests (requires PostgreSQL)
 make test             # via Docker
 ```
+
+### Frontend Jest Config
+The frontend at `apps/frontend/jest.config.cjs` prevents Jest from picking up Playwright E2E tests:
+- Uses a non-existent `testMatch` pattern (`__non_existent__`) so Jest ignores all frontend files
+- The `.cjs` extension is required because the frontend's `package.json` has `"type": "module"`
+- Playwright E2E tests in `apps/frontend/e2e/` are run separately via `npx playwright test`
 
 ### Running Frontend E2E Tests
 ```bash

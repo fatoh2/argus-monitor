@@ -179,6 +179,7 @@ apps/
       mocks/                MSW handlers for E2E testing
       pages/                Page components (Login, Register, Dashboard)
       services/             API client and WebSocket service
+    jest.config.cjs         Jest config — excludes e2e dir from Jest
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler
