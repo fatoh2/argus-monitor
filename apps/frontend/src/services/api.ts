@@ -80,6 +80,35 @@ export interface CreateAlertRulePayload {
   threshold?: string;
 }
 
+export interface TokenBalance {
+  mint: string;
+  symbol: string;
+  amount: string; // stored as string (lamports) to avoid float issues
+  decimals: number;
+  usdValue?: string;
+}
+
+export interface WalletBalance {
+  walletId: string;
+  address: string;
+  chain: string;
+  solBalance: string; // lamports as string
+  tokens: TokenBalance[];
+  updatedAt: string;
+}
+
+export interface Transaction {
+  id: string;
+  walletId: string;
+  signature: string;
+  type: 'send' | 'receive' | 'swap' | 'other';
+  amount: string;
+  symbol: string;
+  fee: string;
+  timestamp: string;
+  status: 'confirmed' | 'pending' | 'failed';
+}
+
 export const authApi = {
   register: (email: string, password: string) =>
     api.post<AuthResponse>('/auth/register', { email, password }),
@@ -95,6 +124,18 @@ export const walletsApi = {
   findAll: () => api.get<Wallet[]>('/wallets'),
   findOne: (id: string) => api.get<Wallet>(`/wallets/${id}`),
   remove: (id: string) => api.delete<{ message: string }>(`/wallets/${id}`),
+};
+
+export const balancesApi = {
+  findByWalletId: (walletId: string) =>
+    api.get<WalletBalance>(`/wallets/${walletId}/balances`),
+  findAll: () => api.get<WalletBalance[]>('/balances'),
+};
+
+export const transactionsApi = {
+  findByWalletId: (walletId: string) =>
+    api.get<Transaction[]>(`/wallets/${walletId}/transactions`),
+  findAll: () => api.get<Transaction[]>('/transactions'),
 };
 
 export const alertRulesApi = {
