@@ -60,10 +60,23 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/__tests__/**",
+      "!main.ts",
+      "!**/*.module.ts"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "../coverage/apps/solana-adapter-service",
+    "coverageThreshold": {
+      "global": {
+        "branches": 70,
+        "functions": 70,
+        "lines": 70,
+        "statements": 70
+      }
+    },
     "testEnvironment": "node",
+    "displayName": "solana-adapter-service",
     "moduleNameMapper": {
       "^@argus/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts"
     }

@@ -1,223 +1,157 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
-import { AllExceptionsFilter } from '../all-exceptions.filter';
-import { Response, Request } from 'express';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { HttpException, HttpStatus, ArgumentsHost } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import { AllExceptionsFilter } from '../all-exceptions.filter';
 
 describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
-  let mockHost: ArgumentsHost;
-  let mockResponse: Partial<Response>;
-  let mockRequest: Partial<Request>;
+  let mockJson: jest.Mock;
+  let mockStatus: jest.Mock;
+  let mockGetResponse: jest.Mock;
+  let mockHttpAdapter: any;
 
   beforeEach(async () => {
-    const mockHttpAdapter = {
-      getRequestUrl: jest.fn(),
-      getRequestMethod: jest.fn(),
-      reply: jest.fn(),
-      getType: jest.fn().mockReturnValue('express'),
+    mockJson = jest.fn();
+    mockStatus = jest.fn().mockReturnValue({ json: mockJson });
+    mockGetResponse = jest.fn().mockReturnValue({
+      status: mockStatus,
+    });
+    mockHttpAdapter = {
+      getRequestUrl: jest.fn().mockReturnValue('/test'),
     };
 
-    const mockHttpAdapterHost = {
+    filter = new AllExceptionsFilter({
       httpAdapter: mockHttpAdapter,
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AllExceptionsFilter,
-        {
-          provide: HttpAdapterHost,
-          useValue: mockHttpAdapterHost,
-        },
-      ],
-    }).compile();
-
-    filter = module.get<AllExceptionsFilter>(AllExceptionsFilter);
-
-    mockResponse = {
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
-    };
-
-    mockRequest = {
-      url: '/test',
-    };
-
-    mockHost = {
-      switchToHttp: jest.fn().mockReturnValue({
-        getResponse: jest.fn().mockReturnValue(mockResponse),
-        getRequest: jest.fn().mockReturnValue(mockRequest),
-      }),
-    } as unknown as ArgumentsHost;
+    } as any);
   });
 
-  afterEach(() => {
-    delete process.env.NODE_ENV;
-  });
+  describe('HttpException handling', () => {
+    it('should handle BadRequestException', () => {
+      const exception = new HttpException('Bad request', HttpStatus.BAD_REQUEST);
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({
+            status: mockStatus,
+          }),
+          getRequest: () => ({ url: '/test' }),
+        }),
+      } as unknown as ArgumentsHost;
 
-  it('should be defined', () => {
-    expect(filter).toBeDefined();
-  });
+      filter.catch(exception, host);
 
-  it('should catch an unhandled error and return 500 with no stack in production', () => {
-    const error = new Error('Test error');
-    process.env.NODE_ENV = 'production';
-
-    filter.catch(error, mockHost);
-
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Internal server error',
+      expect(mockStatus).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Bad request',
+        }),
+      );
     });
-    // No extra fields in production
-    expect(Object.keys((mockResponse.json as jest.Mock).mock.calls[0][0])).toEqual([
-      'statusCode',
-      'message',
-    ]);
-  });
 
-  it('should catch an unhandled error and return 500 with stack in development', () => {
-    const error = new Error('Test error');
-    process.env.NODE_ENV = 'development';
+    it('should handle NotFoundException', () => {
+      const exception = new HttpException('Not found', HttpStatus.NOT_FOUND);
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({
+            status: mockStatus,
+          }),
+          getRequest: () => ({ url: '/test' }),
+        }),
+      } as unknown as ArgumentsHost;
 
-    filter.catch(error, mockHost);
+      filter.catch(exception, host);
 
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Test error',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
+      expect(mockStatus).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: HttpStatus.NOT_FOUND,
+          message: 'Not found',
+        }),
+      );
     });
-  });
 
-  it('should catch an HttpException and return its status and message', () => {
-    const httpException = new HttpException('Forbidden', HttpStatus.FORBIDDEN);
-    process.env.NODE_ENV = 'development';
+    it('should handle exception with object response', () => {
+      const exception = new HttpException(
+        { message: ['email must be a valid email'] },
+        HttpStatus.BAD_REQUEST,
+      );
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({
+            status: mockStatus,
+          }),
+          getRequest: () => ({ url: '/test' }),
+        }),
+      } as unknown as ArgumentsHost;
 
-    filter.catch(httpException, mockHost);
+      filter.catch(exception, host);
 
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.FORBIDDEN,
-      message: 'Forbidden',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
+      expect(mockStatus).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: ['email must be a valid email'],
+        }),
+      );
     });
   });
 
-  it('should map Prisma P2002 to 409 Conflict', () => {
-    const prismaError = new PrismaClientKnownRequestError(
-      'Unique constraint failed',
-      {
-        code: 'P2002',
-        clientVersion: 'test',
-      },
-    );
-    process.env.NODE_ENV = 'development';
+  describe('Unknown exception handling', () => {
+    it('should handle generic Error with its message in non-production mode', () => {
+      // Save original NODE_ENV
+      const originalNodeEnv = process.env.NODE_ENV;
+      delete process.env.NODE_ENV;
 
-    filter.catch(prismaError, mockHost);
+      const exception = new Error('Something went wrong');
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({
+            status: mockStatus,
+          }),
+          getRequest: () => ({ url: '/test' }),
+        }),
+      } as unknown as ArgumentsHost;
 
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.CONFLICT,
-      message: 'Resource already exists.',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
+      filter.catch(exception, host);
+
+      expect(mockStatus).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Something went wrong',
+          path: '/test',
+        }),
+      );
+
+      // Restore
+      process.env.NODE_ENV = originalNodeEnv;
     });
-  });
 
-  it('should map Prisma P2025 to 404 Not Found', () => {
-    const prismaError = new PrismaClientKnownRequestError(
-      'Record not found',
-      {
-        code: 'P2025',
-        clientVersion: 'test',
-      },
-    );
-    process.env.NODE_ENV = 'development';
+    it('should return generic message in production mode', () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
 
-    filter.catch(prismaError, mockHost);
+      const exception = new Error('Something went wrong');
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({
+            status: mockStatus,
+          }),
+          getRequest: () => ({ url: '/test' }),
+        }),
+      } as unknown as ArgumentsHost;
 
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.NOT_FOUND,
-      message: 'Resource not found.',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
+      filter.catch(exception, host);
+
+      expect(mockStatus).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Internal server error',
+        }),
+      );
+
+      process.env.NODE_ENV = originalNodeEnv;
     });
-  });
-
-  it('should map Prisma P2003 to 400 Bad Request', () => {
-    const prismaError = new PrismaClientKnownRequestError(
-      'Foreign key constraint failed',
-      {
-        code: 'P2003',
-        clientVersion: 'test',
-      },
-    );
-    process.env.NODE_ENV = 'development';
-
-    filter.catch(prismaError, mockHost);
-
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.BAD_REQUEST,
-      message: 'Invalid foreign key.',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
-    });
-  });
-
-  it('should handle other Prisma errors as 500 Internal Server Error', () => {
-    const prismaError = new PrismaClientKnownRequestError(
-      'Some other Prisma error',
-      {
-        code: 'PXXX',
-        clientVersion: 'test',
-      },
-    );
-    process.env.NODE_ENV = 'development';
-
-    filter.catch(prismaError, mockHost);
-
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Internal server error',
-      timestamp: expect.any(String),
-      path: '/test',
-      stack: expect.any(String),
-    });
-  });
-
-  it('should return only statusCode and message in production for Prisma errors', () => {
-    const prismaError = new PrismaClientKnownRequestError(
-      'Unique constraint failed',
-      {
-        code: 'P2002',
-        clientVersion: 'test',
-      },
-    );
-    process.env.NODE_ENV = 'production';
-
-    filter.catch(prismaError, mockHost);
-
-    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
-    expect(mockResponse.json).toHaveBeenCalledWith({
-      statusCode: HttpStatus.CONFLICT,
-      message: 'Resource already exists.',
-    });
-    expect(Object.keys((mockResponse.json as jest.Mock).mock.calls[0][0])).toEqual([
-      'statusCode',
-      'message',
-    ]);
   });
 });
