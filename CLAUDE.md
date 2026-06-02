@@ -20,6 +20,7 @@ apps/
   frontend/                 React app
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
+    src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
     src/adapter/            SolanaAdapter (ChainAdapter impl)
@@ -98,6 +99,22 @@ The api-service registers a global `AllExceptionsFilter` in `main.ts` that catch
 - Response body includes `stack` field for debugging
 
 **Source:** `apps/api-service/src/common/filters/all-exceptions.filter.ts`
+
+### Prisma Error Handling
+All repository methods wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`:
+
+| Prisma Error | HTTP Status | Message |
+|---|---|---|
+| `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists"` |
+| `P2025` (record not found) | `404 Not Found` | `"Resource not found"` |
+| `P2003` (foreign key) | `400 Bad Request` | `"Referenced resource does not exist"` |
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` (logged with full context) |
+
+**Services using `handlePrismaError()`:** `WalletsService`, `ChainsService`, `AuthService`, `AlertRulesService` — all CRUD methods.
+
+Non-Prisma errors (e.g., explicit `NotFoundException`, `ConflictException`) are re-thrown as-is and handled by the global `AllExceptionsFilter`.
+
+**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
 ### Health
 - `GET /api/health` — returns `{status: "up"}`

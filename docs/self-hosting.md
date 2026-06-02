@@ -51,7 +51,7 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
 - **Reverse proxy**: The API service should only be accessible via a reverse proxy (nginx, Caddy) with SSL termination. Do not expose services directly to the public internet.
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.
-- **Global exception filter**: In production, the API service strips stack traces from error responses. Internal errors return `{ statusCode, message }` only. All 5xx errors are logged server-side with request context (request ID, user ID, URL). Prisma errors are mapped to proper HTTP codes (409 Conflict, 404 Not Found).
+- **Global exception filter + Prisma error handling**: In production, the API service strips stack traces from error responses. Internal errors return `{ statusCode, message }` only. All 5xx errors are logged server-side with request context (request ID, user ID, URL). Prisma errors are mapped to proper HTTP codes (409 Conflict, 404 Not Found, 400 Bad Request) both at the global filter level and per-method via the shared `handlePrismaError()` utility (`apps/api-service/src/common/prisma-error.handler.ts`).
 - **Rate limiting**: All API endpoints are rate-limited to prevent abuse. Auth endpoints have a stricter limit (10 req/60s) to mitigate brute-force attacks. The health endpoint is exempt to allow monitoring tools uninterrupted access.
 - **JWT token security**: Access tokens are short-lived (15 minutes). Refresh tokens are stored as httpOnly cookies with `sameSite: 'strict'` for CSRF protection. Refresh tokens can be revoked server-side via the `/logout` endpoint.
 

@@ -15,6 +15,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Global Exception Filter** — no stack traces in production responses; Prisma errors mapped to proper HTTP status codes (409 Conflict, 404 Not Found); all 5xx errors logged with redacted request context (body and query params masked via `redact()`)
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
+- **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
 
 ## Architecture
 
@@ -120,6 +121,27 @@ The API service uses `@nestjs/throttler` v6.5.0 to protect all public endpoints 
 When the limit is exceeded, the API returns **HTTP 429 Too Many Requests** with a `Retry-After` header indicating when the client can retry.
 
 **Note:** The throttler uses in-memory storage by default. If you scale to multiple API service instances, configure a Redis store for shared rate limit tracking.
+
+## Prisma Error Handling
+
+All repository methods in the API service wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`:
+
+| Prisma Error Code | Meaning | HTTP Status | Response Message |
+|---|---|---|---|
+| `P2002` | Unique constraint violation | `409 Conflict` | `"Resource already exists"` |
+| `P2025` | Record not found | `404 Not Found` | `"Resource not found"` |
+| `P2003` | Foreign key constraint violation | `400 Bad Request` | `"Referenced resource does not exist"` |
+| Other | Unexpected Prisma error | `500 Internal Server Error` | `"Internal server error"` (logged server-side with full context) |
+
+**Services using `handlePrismaError()`:**
+- `WalletsService` — all CRUD methods (`create`, `findAllByUser`, `findOne`, `remove`)
+- `ChainsService` — all CRUD methods (`create`, `findAll`, `findOne`, `remove`)
+- `AuthService` — `register`, `login`, `refreshToken`
+- `AlertRulesService` — all CRUD methods (`create`, `findAllByUser`, `findOne`, `remove`)
+
+Non-Prisma errors (e.g., `NotFoundException`, `ConflictException` thrown explicitly by service logic) are re-thrown as-is and handled by the global `AllExceptionsFilter`.
+
+**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
 ## Secret Redaction
 
