@@ -1,0 +1,50 @@
+name: Playwright E2E Tests
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/playwright.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/playwright.yml'
+
+jobs:
+  test:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: apps/frontend
+        run: npx playwright install chromium
+
+      - name: Generate MSW service worker
+        working-directory: apps/frontend
+        run: npx msw init public/ --save
+
+      - name: Run Playwright tests
+        working-directory: apps/frontend
+        run: npx playwright test
+        env:
+          VITE_E2E_TEST: 'true'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: apps/frontend/playwright-report/
+          retention-days: 7
