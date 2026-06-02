@@ -48,4 +48,17 @@ export default () => ({
       10,
     ),
   },
+  rpcMonitor: {
+    pollIntervalMs: parseInt(
+      process.env.RPC_MONITOR_POLL_INTERVAL_MS || '30000',
+      10,
+    ),
+    maxSnapshots: parseInt(
+      process.env.RPC_MONITOR_MAX_SNAPSHOTS || '10',
+      10,
+    ),
+    endpoints: process.env.RPC_MONITOR_ENDPOINTS
+      ? process.env.RPC_MONITOR_ENDPOINTS.split(',')
+      : [],
+  },
 });
