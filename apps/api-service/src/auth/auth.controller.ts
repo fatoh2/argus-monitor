@@ -11,7 +11,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { Response } from 'express';
+import { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -50,7 +50,7 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  async refresh(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+  async refresh(@Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response) {
     const refreshToken: string | undefined = req.cookies?.[REFRESH_COOKIE_NAME];
     if (!refreshToken) {
       throw new UnauthorizedException('Refresh token not found');
@@ -65,12 +65,16 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+  async logout(@Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response) {
     const refreshToken: string | undefined = req.cookies?.[REFRESH_COOKIE_NAME];
     if (!refreshToken) {
       // No refresh token to clear — still return success (idempotent)
       return { message: 'Logged out successfully' };
     }
+
+    // Revoke the refresh token server-side so it can't be reused
+    await this.authService.revokeRefreshToken(refreshToken);
+
     res.clearCookie(REFRESH_COOKIE_NAME, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -82,7 +86,7 @@ export class AuthController {
 
   @Post('me')
   @UseGuards(JwtAuthGuard)
-  getProfile(@Request() req: any) {
+  getProfile(@Request() req: ExpressRequest) {
     return req.user;
   }
 

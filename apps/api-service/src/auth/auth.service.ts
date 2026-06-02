@@ -49,14 +49,47 @@ export class AuthService {
 
   async refreshToken(refreshToken: string) {
     try {
-      const payload = this.jwtService.verify(refreshToken);
+      const payload = this.jwtService.verify<{ sub: string; email: string; jti?: string }>(refreshToken);
+
+      // Check if token has been revoked
+      if (payload.jti) {
+        const revoked = await this.prisma.revokedToken.findUnique({
+          where: { tokenJti: payload.jti },
+        });
+        if (revoked) {
+          throw new UnauthorizedException('Token has been revoked');
+        }
+      }
+
       const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
       if (!user) {
         throw new UnauthorizedException('User not found');
       }
       return this.generateTokens(user.id, user.email);
-    } catch {
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+  }
+
+  async revokeRefreshToken(refreshToken: string): Promise<void> {
+    try {
+      const payload = this.jwtService.verify<{ sub: string; email: string; jti?: string; exp?: number }>(refreshToken);
+      if (payload.jti && payload.exp) {
+        // Store the revoked token JTI so it can't be reused
+        await this.prisma.revokedToken.upsert({
+          where: { tokenJti: payload.jti },
+          update: {}, // Already exists — no-op
+          create: {
+            tokenJti: payload.jti,
+            expiresAt: new Date(payload.exp * 1000), // exp is in seconds
+          },
+        });
+      }
+    } catch {
+      // If token is already expired/invalid, nothing to revoke
     }
   }
 
@@ -67,9 +100,13 @@ export class AuthService {
       expiresIn: ACCESS_TOKEN_TTL,
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
-      expiresIn: REFRESH_TOKEN_TTL,
-    });
+    // Generate refresh token with a unique JWT ID (jti) for revocation support
+    const refreshToken = this.jwtService.sign(
+      { ...payload, jti: crypto.randomUUID() },
+      {
+        expiresIn: REFRESH_TOKEN_TTL,
+      },
+    );
 
     return {
       accessToken,
