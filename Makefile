@@ -47,13 +47,19 @@ migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
+# ── check ────────────────────────────────────────────────────────────────────
+# Runs tsc --noEmit inside the api-service container for environment consistency.
+# $(PWD) is a Make variable that expands to the project root directory.
+# Source directories (apps/, packages/) and tsconfig files are mounted as
+# volumes so the container can access TypeScript source files for type-checking.
+# The api-service runner image includes node_modules (with tsc) from the build stage.
 check: ## TypeScript type-check (all apps) — runs inside Docker for consistency
 	docker compose run --rm --no-deps \
 		-v $(PWD)/apps:/app/apps \
 		-v $(PWD)/packages:/app/packages \
 		-v $(PWD)/tsconfig.json:/app/tsconfig.json \
 		-v $(PWD)/tsconfig.base.json:/app/tsconfig.base.json \
-		api-service npx tsc --noEmit
+		api-service npx tsc --noEmit --project tsconfig.json
 
 test: ## Run all workspace tests (inside Docker for consistency)
 	docker compose run --rm api-service npm test
@@ -192,7 +198,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	@echo "  ✅ type check passed"
 	@echo ""
 	@echo "🧪 Step 7/7: Running unit tests (make test)..."
-	@docker compose exec api-service npm test || { echo "  ❌ FAIL: unit tests failed"; exit 1; }
+	@make test || { echo "  ❌ FAIL: unit tests failed"; exit 1; }
 	@echo "  ✅ unit tests passed"
 	@echo ""
 	@echo "=========================================="
@@ -203,7 +209,7 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@$(MAKE) test-local
 	@echo ""
 	@echo "🧪 Running e2e tests..."
-	@docker compose exec api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
+	@docker compose run --rm api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
 	@echo "  ✅ e2e tests passed"
 	@echo ""
 	@echo "=========================================="
