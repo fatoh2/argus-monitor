@@ -13,6 +13,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
 - **Health Checks** — `/api/health` endpoint for all services
 - **Global Exception Filter** — no stack traces in production responses; Prisma errors mapped to proper HTTP status codes (409 Conflict, 404 Not Found); all 5xx errors logged with request context
+- **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt
 
 ## Architecture
 
@@ -72,6 +73,21 @@ All blockchain adapters implement the `ChainAdapter` interface from `@argus/shar
 - **Wallet** — blockchain address + chain type, owned by user
 - **AlertRule** — rule configuration per wallet (type, threshold, chain)
 - **Chain** — supported blockchain networks (name, RPC URL)
+
+
+## Rate Limiting
+
+The API service uses `@nestjs/throttler` v6.5.0 to protect all public endpoints from abuse:
+
+| Endpoint Group | Limit | Scope |
+|----------------|-------|-------|
+| All endpoints (default) | 100 requests per 60 seconds per IP | Global |
+| Auth (`/api/auth/login`, `/register`, `/refresh`) | 10 requests per 60 seconds per IP | Per-endpoint override via `@Throttle()` |
+| Health (`GET /api/health`) | Unlimited | Exempt via `@SkipThrottle()` |
+
+When the limit is exceeded, the API returns **HTTP 429 Too Many Requests** with a `Retry-After` header indicating when the client can retry.
+
+**Note:** The throttler uses in-memory storage by default. If you scale to multiple API service instances, configure a Redis store for shared rate limit tracking.
 
 ## Solana Adapter Service
 

@@ -89,6 +89,19 @@ The api-service registers a global `AllExceptionsFilter` in `main.ts` that catch
 ### Health
 - `GET /api/health` — returns `{status: "up"}`
 
+### Rate Limiting
+The api-service uses `@nestjs/throttler` v6.5.0 for global rate limiting to protect against abuse:
+
+- **Global default**: 100 requests per 60 seconds per IP — applies to all endpoints
+- **Auth endpoints** (`POST /api/auth/login`, `/register`, `/refresh`): **10 requests per 60 seconds** per IP (stricter limit via `@Throttle()` decorator)
+- **Health endpoint** (`GET /api/health`): **exempt** from rate limiting via `@SkipThrottle()`
+- **429 response**: Automatically returned with `Retry-After` header when limit exceeded
+- **Storage**: In-memory by default (single-instance). For multi-instance deployments, switch to Redis store.
+
+The `ThrottlerGuard` is registered as a global guard in `app.module.ts`. Individual endpoints can override the default limit using `@Throttle()` or opt out using `@SkipThrottle()`.
+
+**Source:** `apps/api-service/src/app.module.ts`, `apps/api-service/src/auth/auth.controller.ts`, `apps/api-service/src/health/health.controller.ts`
+
 ### Global ValidationPipe
 The api-service applies a global `ValidationPipe` in `main.ts` with these settings:
 - **whitelist: true** — strips unknown properties from request bodies

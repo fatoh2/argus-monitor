@@ -51,6 +51,7 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.
 - **Global exception filter**: In production, the API service strips stack traces from error responses. Internal errors return `{ statusCode, message }` only. All 5xx errors are logged server-side with request context (request ID, user ID, URL). Prisma errors are mapped to proper HTTP codes (409 Conflict, 404 Not Found).
+- **Rate limiting**: All API endpoints are rate-limited to prevent abuse. Auth endpoints have a stricter limit (10 req/60s) to mitigate brute-force attacks. The health endpoint is exempt to allow monitoring tools uninterrupted access.
 
 ## Setup Steps
 
@@ -76,6 +77,14 @@ Below is a reference of all environment variables:
 NODE_ENV=production
 
 # ---- API Service (port 3000) ----
+# Rate Limiting (global for API service)
+API_RATE_LIMIT_TTL=60000
+API_RATE_LIMIT_LIMIT=100
+
+# Rate Limiting (auth endpoints)
+AUTH_RATE_LIMIT_TTL=60000
+AUTH_RATE_LIMIT_LIMIT=10
+
 API_SERVICE_PORT=3000
 JWT_SECRET=generate-a-strong-random-secret
 JWT_EXPIRATION_TIME=60s
