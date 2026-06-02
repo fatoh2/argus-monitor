@@ -56,3 +56,13 @@ model Chain {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model RevokedToken {
+  id        String   @id @default(uuid())
+  tokenJti  String   @unique // JWT ID (jti) — unique per token
+  expiresAt DateTime // When the token naturally expires; we can clean up after this
+  createdAt DateTime @default(now())
+
+  @@index([tokenJti])
+  @@index([expiresAt])
+}

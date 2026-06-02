@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -21,6 +22,9 @@ async function bootstrap() {
 
   // Security headers — sets CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.
   app.use(helmet());
+
+  // Cookie parser — required for httpOnly refresh token cookies
+  app.use(cookieParser());
 
   // Global exception filter — prevents stack traces leaking in production
   app.useGlobalFilters(new AllExceptionsFilter());

@@ -24,6 +24,10 @@ describe('AuthService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
+    revokedToken: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -38,6 +42,7 @@ describe('AuthService', () => {
           provide: JwtService,
           useValue: {
             sign: jest.fn().mockReturnValue('mock-token'),
+            verify: jest.fn().mockReturnValue({ sub: 'user-1', email: 'test@example.com', jti: 'mock-jti' }),
           },
         },
       ],
@@ -111,21 +116,72 @@ describe('AuthService', () => {
   });
 
   describe('refreshToken', () => {
-    it('should return new tokens for valid user', async () => {
+    it('should return new tokens for valid refresh token', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockPrisma.revokedToken.findUnique.mockResolvedValue(null);
 
-      const result = await service.refreshToken('user-1');
+      const result = await service.refreshToken('valid-refresh-token');
 
+      expect(jwtService.verify).toHaveBeenCalledWith('valid-refresh-token');
+      expect(mockPrisma.revokedToken.findUnique).toHaveBeenCalledWith({ where: { tokenJti: 'mock-jti' } });
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'user-1' } });
       expect(jwtService.sign).toHaveBeenCalledTimes(2);
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
     });
 
+    it('should throw UnauthorizedException if refresh token is revoked', async () => {
+      mockPrisma.revokedToken.findUnique.mockResolvedValue({ id: 'revoked-1', tokenJti: 'mock-jti', expiresAt: new Date(), createdAt: new Date() });
+
+      await expect(service.refreshToken('revoked-token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException if refresh token is invalid', async () => {
+      (jwtService.verify as jest.Mock).mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(service.refreshToken('expired-token')).rejects.toThrow(UnauthorizedException);
+    });
+
     it('should throw UnauthorizedException if user not found', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.revokedToken.findUnique.mockResolvedValue(null);
 
-      await expect(service.refreshToken('nonexistent-id')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('valid-token-no-user')).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('revokeRefreshToken', () => {
+    it('should upsert a revoked token entry', async () => {
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'user-1',
+        email: 'test@example.com',
+        jti: 'token-jti-123',
+        exp: Math.floor(Date.now() / 1000) + 86400, // 1 day from now
+      });
+      mockPrisma.revokedToken.upsert.mockResolvedValue({ id: 'rev-1', tokenJti: 'token-jti-123' });
+
+      await service.revokeRefreshToken('some-token');
+
+      expect(mockPrisma.revokedToken.upsert).toHaveBeenCalledWith({
+        where: { tokenJti: 'token-jti-123' },
+        update: {},
+        create: {
+          tokenJti: 'token-jti-123',
+          expiresAt: expect.any(Date),
+        },
+      });
+    });
+
+    it('should silently handle invalid tokens', async () => {
+      (jwtService.verify as jest.Mock).mockImplementation(() => {
+        throw new Error('invalid');
+      });
+
+      // Should not throw
+      await service.revokeRefreshToken('invalid-token');
+      expect(mockPrisma.revokedToken.upsert).not.toHaveBeenCalled();
     });
   });
 });
