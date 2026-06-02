@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -28,7 +29,8 @@ async function bootstrap() {
   app.use(cookieParser());
 
   // Global exception filter — prevents stack traces leaking in production
-  app.useGlobalFilters(new AllExceptionsFilter());
+  const httpAdapterHost = app.get(HttpAdapterHost);
+  app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
 
   // Enable CORS for frontend — locked down to allowed origins
   app.enableCors({

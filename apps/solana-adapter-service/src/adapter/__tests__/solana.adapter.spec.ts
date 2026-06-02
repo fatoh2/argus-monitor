@@ -339,4 +339,154 @@ describe('SolanaAdapter', () => {
       expect(result.error).toBe('Connection refused');
     });
   });
+
+  describe('parseInstructions', () => {
+  it('should handle SPL token transfer instructions', async () => {
+    // This tests the Tokenkeg... program ID branch
+    const { Connection } = jest.requireMock('@solana/web3.js');
+    const fromAddr = validAddress;
+    const toAddr = 'Gg7UjK8Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2';
+
+    // Create a transaction with SPL token transfer
+    const mockTx = {
+      meta: {
+        err: null,
+        fee: 5000,
+        innerInstructions: [],
+        postBalances: [1000000000, 500000000],
+        preBalances: [1100000000, 400000000],
+      },
+      transaction: {
+        message: {
+          accountKeys: [
+            { pubkey: { toString: () => fromAddr } },
+            { pubkey: { toString: () => toAddr } },
+          ],
+          instructions: [
+            {
+              programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+              parsed: {
+                type: 'transfer',
+                info: {
+                  source: fromAddr,
+                  destination: toAddr,
+                  amount: 5000000,
+                },
+              },
+            },
+          ],
+        },
+        signatures: ['sig-spl-transfer'],
+      },
+      slot: 200,
+      blockTime: 1700000000,
+    };
+
+    mockConnection.getSignaturesForAddress.mockResolvedValue([
+      { signature: 'sig-spl-transfer', slot: 200 },
+    ]);
+    mockConnection.getParsedTransactions.mockResolvedValue([mockTx]);
+
+    const result = await adapter.getRecentTransactions(validAddress, 20);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('spl_transfer');
+    expect(result[0].amount).toBe(BigInt(5000000));
+  });
+
+  it('should handle transactions with no parsed instructions (fallback to account keys)', async () => {
+    const fromAddr = validAddress;
+    const toAddr = 'Gg7UjK8Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2';
+
+    // Transaction with unparsed instructions — should fallback to account keys
+    const mockTx = {
+      meta: {
+        err: null,
+        fee: 5000,
+        innerInstructions: [],
+        postBalances: [500000000, 1000000000],
+        preBalances: [1000000000, 500000000],
+      },
+      transaction: {
+        message: {
+          accountKeys: [
+            { pubkey: { toString: () => fromAddr } },
+            { pubkey: { toString: () => toAddr } },
+          ],
+          instructions: [
+            {
+              programId: 'SomeOtherProgram',
+              parsed: null,
+            },
+          ],
+        },
+        signatures: ['sig-fallback'],
+      },
+      slot: 300,
+      blockTime: 1700000001,
+    };
+
+    mockConnection.getSignaturesForAddress.mockResolvedValue([
+      { signature: 'sig-fallback', slot: 300 },
+    ]);
+    mockConnection.getParsedTransactions.mockResolvedValue([mockTx]);
+
+    const result = await adapter.getRecentTransactions(validAddress, 20);
+
+    expect(result).toHaveLength(1);
+    // Should fallback to account keys for from/to
+    expect(result[0].from).toBe(fromAddr);
+    expect(result[0].to).toBe(toAddr);
+  });
+
+  it('should handle System Program transfer instructions', async () => {
+    const fromAddr = validAddress;
+    const toAddr = 'Gg7UjK8Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2Kz2';
+
+    const mockTx = {
+      meta: {
+        err: null,
+        fee: 5000,
+        innerInstructions: [],
+        postBalances: [500000000, 1000000000],
+        preBalances: [1000000000, 500000000],
+      },
+      transaction: {
+        message: {
+          accountKeys: [
+            { pubkey: { toString: () => fromAddr } },
+            { pubkey: { toString: () => toAddr } },
+          ],
+          instructions: [
+            {
+              programId: '11111111111111111111111111111111',
+              parsed: {
+                type: 'transfer',
+                info: {
+                  source: fromAddr,
+                  destination: toAddr,
+                  lamports: 500000000,
+                },
+              },
+            },
+          ],
+        },
+        signatures: ['sig-system-transfer'],
+      },
+      slot: 400,
+      blockTime: 1700000002,
+    };
+
+    mockConnection.getSignaturesForAddress.mockResolvedValue([
+      { signature: 'sig-system-transfer', slot: 400 },
+    ]);
+    mockConnection.getParsedTransactions.mockResolvedValue([mockTx]);
+
+    const result = await adapter.getRecentTransactions(validAddress, 20);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('sol_transfer');
+    expect(result[0].amount).toBe(BigInt(500000000));
+  });
+});
 });

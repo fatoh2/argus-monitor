@@ -82,6 +82,10 @@ export class AuthService {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
+      // Convert JWT verification errors to UnauthorizedException
+      if (error instanceof Error && (error.message === 'jwt expired' || error.message === 'invalid token' || error.message === 'jwt malformed' || error.message === 'invalid signature')) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
       handlePrismaError(error, 'AuthService.refreshToken');
     }
   }
@@ -107,8 +111,9 @@ export class AuthService {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      if (error instanceof Error && error.message === 'jwt expired') {
-        this.logger.debug('Attempted to revoke an invalid or expired refresh token');
+      // Any JWT verification error means the token can't be revoked — silently ignore
+      if (error instanceof Error) {
+        this.logger.debug('Attempted to revoke an invalid or expired refresh token: ' + error.message);
         return;
       }
       handlePrismaError(error, 'AuthService.revokeRefreshToken');
