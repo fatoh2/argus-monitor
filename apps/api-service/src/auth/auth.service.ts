@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +11,8 @@ const REFRESH_TOKEN_TTL = '7d';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -90,6 +92,9 @@ export class AuthService {
       }
     } catch {
       // If token is already expired/invalid, nothing to revoke
+      // Log at debug level so we can detect probing/malformed tokens without
+      // alerting on routine expired-token cleanup
+      this.logger.debug('Attempted to revoke an invalid or expired refresh token');
     }
   }
 
