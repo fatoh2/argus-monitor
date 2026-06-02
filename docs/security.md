@@ -34,6 +34,24 @@ This architecture provides a strong defense against common web vulnerabilities:
 - **Replay attacks:** Each refresh token has a unique `jti` — revocation prevents replay
 
 
+## Prisma Error Handling
+
+All repository methods in the API service wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`. This provides defense-in-depth against information leakage through database errors:
+
+| Prisma Error Code | Meaning | HTTP Response | Security Benefit |
+|---|---|---|---|
+| `P2002` | Unique constraint violation | `409 Conflict` — `"Resource already exists"` | Prevents enumeration attacks (no detail on which field conflicted) |
+| `P2025` | Record not found | `404 Not Found` — `"Resource not found"` | Consistent error messages prevent resource enumeration |
+| `P2003` | Foreign key violation | `400 Bad Request` — `"Referenced resource does not exist"` | Generic message doesn't reveal schema details |
+| Other | Unexpected Prisma error | `500 Internal Server Error` — `"Internal server error"` | Full error logged server-side only; never exposed to client |
+
+**Services using `handlePrismaError()`:** `WalletsService`, `ChainsService`, `AuthService`, `AlertRulesService` — all CRUD methods.
+
+This complements the global `AllExceptionsFilter` by catching Prisma errors at the service layer before they reach the filter, ensuring consistent, safe error responses even if the filter's Prisma handling were bypassed.
+
+**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
+
+>>>>>>> origin/develop
 ## Secret Redaction
 
 Argus Monitor enforces a strict **no secrets in logs** policy to prevent accidental exposure of credentials, tokens, or PII through application logs.
