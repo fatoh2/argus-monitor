@@ -11,8 +11,6 @@ export const QUEUES = {
   ALERT_EVALUATION: 'alert:evaluation',
   /** Consumed by notification-service: send notifications */
   NOTIFICATION_DISPATCH: 'notification:dispatch',
-  /** Consumed by rpc-monitor: health check RPC endpoints */
-  RPC_HEALTH_CHECK: 'rpc:health-check',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -43,9 +41,5 @@ export interface QueueJobMap {
     walletId: string;
     channel: string;
     message: string;
-  };
-  [QUEUES.RPC_HEALTH_CHECK]: {
-    rpcUrl: string;
-    chainType: string;
   };
 }

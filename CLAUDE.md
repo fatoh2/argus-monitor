@@ -31,7 +31,6 @@ apps/
     src/config/             Helius, Redis, rate limiter, circuit breaker config
   alert-service/            Alert rule evaluation engine
   notification-service/     Telegram bot notifications
-  rpc-monitor-service/      RPC health checks + circuit breaker
 packages/
   chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
   shared-types/             Enums, queue names, job payload types, ChainAdapter interface
@@ -117,223 +116,49 @@ All repository methods wrap Prisma calls with `try/catch` using the shared `hand
 | `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
 | `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
 | `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` (logged with full context) |
-
-**Services using `handlePrismaError()`:** `WalletsService`, `ChainsService`, `AuthService`, `AlertRulesService` — all CRUD methods.
-
-Non-Prisma errors (e.g., explicit `NotFoundException`, `ConflictException`) are re-thrown as-is and handled by the global `AllExceptionsFilter`.
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` |
 
 **Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
-### Health
-- `GET /api/health` — returns `{status: "up"}`
-
 ### Rate Limiting
-The api-service uses `@nestjs/throttler` v6.5.0 for global rate limiting to protect against abuse:
+- Global: 100 requests per 60 seconds per IP (NestJS `@nestjs/throttler`)
+- Auth endpoints: 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
+- Health endpoint: exempt from rate limiting (`@SkipThrottle()`)
+- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
 
-- **Global default**: 100 requests per 60 seconds per IP — applies to all endpoints
-- **Auth endpoints** (`POST /api/auth/login`, `/register`, `/refresh`): **10 requests per 60 seconds** per IP (stricter limit via `@Throttle()` decorator)
-- **Health endpoint** (`GET /api/health`): **exempt** from rate limiting via `@SkipThrottle()`
-- **429 response**: Automatically returned with `Retry-After` header when limit exceeded
-- **Storage**: In-memory by default (single-instance). For multi-instance deployments, switch to Redis store.
-
-The `ThrottlerGuard` is registered as a global guard in `app.module.ts`. Individual endpoints can override the default limit using `@Throttle()` or opt out using `@SkipThrottle()`.
-
-**Source:** `apps/api-service/src/app.module.ts`, `apps/api-service/src/auth/auth.controller.ts`, `apps/api-service/src/health/health.controller.ts`
-
-### Global ValidationPipe
-The api-service applies a global `ValidationPipe` in `main.ts` with these settings:
-- **whitelist: true** — strips unknown properties from request bodies
-- **forbidNonWhitelisted: true** — throws 400 BadRequest on unknown properties
-- **transform: true** — coerces types (e.g. string to number for query params like `page=2`)
-
-This means all DTOs are enforced at runtime. Sending extra fields, missing required fields, or wrong types returns a 400 error instead of causing a 500.
-
-### WebSocket Gateway
-- Namespace: `/ws`
-- Auth: JWT token in `auth.token` or `query.token`
-- Events: `subscribe-wallet`, `unsubscribe-wallet` (client→server)
-- Emits: `wallet_update`, `alert_triggered`, `connected` (server→client)
+### Secret Redaction
+All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
 
 ## Solana Adapter Service Details
 
-The `solana-adapter-service` (port 3002) provides Helius RPC integration.
+The `solana-adapter-service` (port 3002) connects to the Solana blockchain via Helius RPC.
 
-### SolanaAdapter (`src/adapter/solana.adapter.ts`)
-Implements `ChainAdapter` interface for Solana:
+### SolanaAdapter
+Implements `ChainAdapter` from `@argus/shared-types`. Uses `@solana/web3.js` Connection class.
 
-- `getNativeBalance(address)` — returns SOL balance in lamports (BIGINT)
-- `getTokenBalances(address)` — returns SPL token balances, skips zero-balance tokens
-- `getRecentTransactions(address, limit=20)` — returns last N transactions normalized to `Transaction` interface
-- `checkRpcHealth(endpoint)` — latency + block height health check
-- Transaction normalization: parses system program transfers (SOL) and token program transfers (SPL)
+### Rate Limiter
+Token bucket algorithm. Configurable via `config/configuration.ts`:
+- `tokensPerInterval`: number of requests allowed per interval
+- `interval`: time window in milliseconds
+- `maxTokens`: maximum burst capacity
 
-### Rate Limiter (`src/rate-limiter/rate-limiter.service.ts`)
-Token bucket algorithm protecting Helius RPC from excessive requests:
+### Circuit Breaker
+Three-state circuit breaker (CLOSED / OPEN / HALF_OPEN):
+- **CLOSED**: normal operation, requests pass through
+- **OPEN**: failures exceed threshold, requests are rejected immediately
+- **HALF_OPEN**: after cooldown, a single test request is allowed
+- Failure threshold and cooldown period are configurable
 
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Max RPS | `RATE_LIMITER_MAX_RPS` | 10 | Max requests per second |
-| Max retries | `RATE_LIMITER_MAX_RETRIES` | 3 | Retry attempts on rate limit |
-| Base delay | `RATE_LIMITER_BASE_DELAY_MS` | 1000 | Initial backoff delay (ms) |
-| Max delay | `RATE_LIMITER_MAX_DELAY_MS` | 30000 | Maximum backoff delay (ms) |
+### Consumer
+BullMQ consumer for the `solana:fetch` queue. Processes wallet fetch jobs by calling `SolanaAdapter` methods.
 
-### Circuit Breaker (`src/circuit-breaker/circuit-breaker.service.ts`)
-Three-state circuit breaker (`CLOSED → OPEN → HALF_OPEN`) that prevents cascading failures when Helius RPC is degraded:
+## Testing
+- Backend: Jest with `--passWithNoTests` flag
+- E2E: supertest for HTTP endpoint testing
+- Run tests: `npm test` (root) or `npx jest` (per service)
+- Coverage: `npm run test:cov`
 
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open |
-| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Consecutive successes to close |
-| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Wait before half-open (ms) |
-| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts when circuit is closed |
-| Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
-| Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
-
-### Consumer (`src/consumer/solana.consumer.ts`)
-BullMQ consumer for the `solana:fetch` queue. Processes jobs from the chain-indexer:
-
-- **Job payload**: `{walletId, address, monitorType}`
-- **Flow**: Fetch data via SolanaAdapter → write to DB → push `alert:evaluation` job
-- **Error handling**: Failed jobs go to dead-letter queue after max retries
-
-### Caching
-In-memory cache with TTL to reduce redundant RPC calls:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Cache TTL | `CACHE_TTL_MS` | 30000 | Cache duration (ms) |
-| Max entries | `CACHE_MAX_ENTRIES` | 1000 | Max cached items |
-
-## Prisma Schema
-
-### Models
-
-```prisma
-model User {
-  id           String      @id @default(uuid())
-  email        String      @unique
-  passwordHash String
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  wallets      Wallet[]
-  alertRules   AlertRule[]
-}
-
-model Wallet {
-  id        String      @id @default(uuid())
-  address   String
-  chain     String
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  alertRules AlertRule[]
-
-  @@unique([address, chain, userId])
-  @@index([userId])
-}
-
-model AlertRule {
-  id        String   @id @default(uuid())
-  chain     String
-  type      String
-  threshold String?
-  userId    String
-  walletId  String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([walletId])
-}
-
-model Chain {
-  id     String @id @default(uuid())
-  name   String @unique
-  rpcUrl String
-}
-
-model RevokedToken {
-  id        String   @id @default(uuid())
-  tokenJti  String   @unique // JWT ID (jti) — unique per token
-  expiresAt DateTime // When the token naturally expires; we can clean up after this
-  createdAt DateTime @default(now())
-
-  @@index([tokenJti])
-  @@index([expiresAt])
-}
-```
-
-## Critical Data Rules
-- **NEVER** store on-chain amounts as `float` or `decimal` — always `BIGINT`
-  - Solana: lamports (1 SOL = 1_000_000_000 lamports)
-  - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
-  - Store `asset_decimals` separately for display
-- **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
-- **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
-- **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
-  - Index: `(wallet_id, captured_at DESC)` for chart queries
-
-## Service Communication Rules
-- Services communicate via **BullMQ queues only** — no direct HTTP between services
-- Queue names are defined in `packages/shared-types/src/queues/index.ts` — never hardcode
-- The chain-indexer pushes jobs → solana-adapter consumes them
-- solana-adapter writes to DB → alert-service reads via BullMQ or Postgres LISTEN
-
-## Non-Negotiable Rules
-- **NEVER** push directly to `main` or `develop` — always open a PR
-- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) scans all source files for log calls referencing secret env vars and enforces this policy.
-- **NEVER** commit `.env` files or API keys
-- **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
-- **NEVER** make direct HTTP calls between services — always BullMQ
-- **NEVER** use `any` type in TypeScript
-- **ALWAYS** write unit tests for: adapter methods, alert rule logic, data normalization
-- **ALWAYS** add `/metrics` Prometheus endpoint to every new NestJS service
-- **ALWAYS** run `npx prisma validate` before committing schema changes
-- **ALWAYS** run `npm test` before opening a PR
-- **ALWAYS** run `npm run build` — no TypeScript compilation errors allowed
-
-## Auth (MVP)
-Auth is inside `api-service` using NestJS Guards + JWT + Passport.
-- JWT strategy: `passport-jwt` with Bearer token extraction (access token)
-- Refresh token: httpOnly cookie (`refresh_token`) with `jti` for revocation
-- Global `JwtAuthGuard` applied per-controller
-- Passwords: bcrypt with 12 salt rounds
-- Access token: 15 minutes (hardcoded `15m`)
-- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation
-- Revoked tokens stored in `RevokedToken` table (by `jti`)
-- Cookie parser middleware registered in `main.ts`
-- Do NOT create a separate auth-service until explicitly instructed.
-
-## PR Format
-```
-Title: [monitor] short description  OR  [frontend] short description
-Body: What changed, why, how to test, risks, checklist
-Branch: feature/issue-{number}-{short-description}
-Base: develop (never main)
-```
-
-## Environment Variables
-
-All env vars are documented in `.env.example` at the repo root. Key vars:
-
-| Variable | Service | Required | Default |
-|----------|---------|----------|---------|
-| `HELIUS_API_KEY` | solana-adapter | Yes | — |
-| `HELIUS_RPC_URL` | solana-adapter | No | `https://mainnet.helius-rpc.com/?api-key=` |
-| `RATE_LIMITER_MAX_RPS` | solana-adapter | No | 10 |
-| `RATE_LIMITER_MAX_RETRIES` | solana-adapter | No | 3 |
-| `RATE_LIMITER_BASE_DELAY_MS` | solana-adapter | No | 1000 |
-| `RATE_LIMITER_MAX_DELAY_MS` | solana-adapter | No | 30000 |
-| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | solana-adapter | No | 5 |
-| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | solana-adapter | No | 3 |
-| `CIRCUIT_BREAKER_TIMEOUT_MS` | solana-adapter | No | 30000 |
-| `JWT_SECRET` | api-service | Yes | — |
-| `DATABASE_URL` | api-service | Yes | — |
-| `REDIS_HOST` | all | No | localhost |
-| `REDIS_PORT` | all | No | 6379 |
-| `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
-| `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
+## Docker
+- Local dev: `docker compose up -d` (uses docker-compose.yml)
+- Production: `docker compose -f docker-compose.prod.yml up -d`
+- Build: `docker compose build`
