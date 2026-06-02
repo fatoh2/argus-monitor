@@ -69,6 +69,7 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), 
 	@docker compose ps --status running --format '{{.Name}}' postgres | grep -q postgres || { echo "ERROR: postgres container failed to start"; exit 1; }
 	@docker compose ps --status running --format '{{.Name}}' redis | grep -q redis || { echo "ERROR: redis container failed to start"; exit 1; }
 	@echo "Waiting for postgres to be healthy..."
+	@sleep 2
 	@for i in $$(seq 1 30); do \
 		if docker compose exec -T postgres pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB) >/dev/null 2>&1; then \
 			echo "Postgres is healthy!"; \
@@ -83,6 +84,7 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), 
 		sleep 2; \
 	done
 	@echo "Waiting for redis to be healthy..."
+	@sleep 2
 	@for i in $$(seq 1 30); do \
 		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
 			echo "Redis is healthy!"; \
@@ -114,6 +116,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	@docker compose up -d postgres redis
 	@echo ""
 	@echo "⏳ Step 2/7: Waiting for postgres and redis to be healthy..."
+	@sleep 2
 	@for i in $$(seq 1 30); do \
 		if docker compose exec -T postgres pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB) >/dev/null 2>&1; then \
 			echo "  ✅ postgres is healthy!"; \
@@ -126,6 +129,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 		fi; \
 		sleep 2; \
 	done
+	@sleep 2
 	@for i in $$(seq 1 30); do \
 		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
 			echo "  ✅ redis is healthy!"; \
@@ -183,7 +187,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	@echo "  ✅ type check passed"
 	@echo ""
 	@echo "🧪 Step 7/7: Running unit tests (make test)..."
-	@make test || { echo "  ❌ FAIL: unit tests failed"; exit 1; }
+	@docker compose exec api-service npm test || { echo "  ❌ FAIL: unit tests failed"; exit 1; }
 	@echo "  ✅ unit tests passed"
 	@echo ""
 	@echo "=========================================="
@@ -194,7 +198,7 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@$(MAKE) test-local
 	@echo ""
 	@echo "🧪 Running e2e tests..."
-	@docker compose run --rm api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
+	@docker compose exec api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
 	@echo "  ✅ e2e tests passed"
 	@echo ""
 	@echo "=========================================="
@@ -202,5 +206,5 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@echo "=========================================="
 	@echo ""
 	@echo "🧹 Cleaning up..."
-	@docker compose down 2>/dev/null || true
+	@docker compose down -v 2>/dev/null || true
 	@echo "  ✅ cleanup complete"
