@@ -11,7 +11,8 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 - **Queue**: Redis + BullMQ
 - **Real-time**: NestJS WebSocket Gateway + Socket.io
 - **Chain**: Solana via Helius API + @solana/web3.js
-- **Testing**: Jest + Testcontainers (backend), Playwright (E2E)
+- **Testing**: Jest + ts-jest + supertest (backend), Playwright (E2E)
+- **CI**: GitHub Actions (test.yml — PostgreSQL + Redis services on every PR)
 - **Local dev**: docker-compose.yml, Makefile (see `make help`)
 
 ## Repo Structure
@@ -22,6 +23,7 @@ apps/
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
     src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests (rate limiting via supertest)
+    test/app.e2e-spec.ts    E2E integration tests (supertest) for all REST endpoints
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
     src/adapter/            SolanaAdapter (ChainAdapter impl)
@@ -35,9 +37,39 @@ packages/
   chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
   shared-types/             Enums, queue names, job payload types, ChainAdapter interface
 k8s/apps/                   Helm charts for all services
-docker-compose.yml          Local dev — all services + PostgreSQL + Redis
+.github/workflows/
+  test.yml                  CI pipeline — runs on every PR (PostgreSQL + Redis services)
+jest.config.js              Root Jest config with project references for all 5 apps
+docker-compose.yml          Local dev — all services + PostgreSQL + Redis (env_file pattern)
 docker-compose.prod.yml     Self-hosted production
+Makefile                    Dev commands (up, down, migrate, seed, test, check, reset)
 ```
+
+## Testing
+
+### Running Tests
+```bash
+npm test              # all unit tests (228 tests, 36 suites)
+npm run test:cov      # with coverage (70% threshold)
+npm run test:e2e      # E2E tests (requires PostgreSQL)
+make test             # via Docker
+```
+
+### Test Coverage by Service
+- **api-service** (15 files): AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints
+- **solana-adapter-service** (5 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config
+- **alert-service** (3 files): AlertEngineService (all rule types)
+- **notification-service** (4 files): TelegramService (send, format, error handling)
+- **chain-indexer-service** (3 files): AppController, AppService, HealthController
+
+### CI Pipeline
+The `.github/workflows/test.yml` workflow runs on every PR to `develop` or `main`:
+1. Spins up PostgreSQL 16 + Redis 7 service containers
+2. Installs deps, generates Prisma client, runs migrations
+3. TypeScript check (`tsc --noEmit`)
+4. Lint check
+5. Tests with coverage (70% threshold)
+6. Uploads coverage artifacts
 
 ## API Service Details
 
@@ -116,49 +148,22 @@ All repository methods wrap Prisma calls with `try/catch` using the shared `hand
 | `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
 | `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
 | `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` |
-
-**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"`
 
 ### Rate Limiting
-- Global: 100 requests per 60 seconds per IP (NestJS `@nestjs/throttler`)
-- Auth endpoints: 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
-- Health endpoint: exempt from rate limiting (`@SkipThrottle()`)
-- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
+Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
+
+| Scope | Limit | TTL | Exemptions |
+|-------|-------|-----|------------|
+| Global (all endpoints) | 100 requests | 60 seconds | — |
+| Auth endpoints | 10 requests | 60 seconds | — |
+| Health endpoint | Unlimited | — | Exempt via `@SkipThrottle()` |
+
+Rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 
 ### Secret Redaction
-All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
+All log calls use NestJS `Logger` (not `console.log`). The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
 
-## Solana Adapter Service Details
+## Environment Variables
 
-The `solana-adapter-service` (port 3002) connects to the Solana blockchain via Helius RPC.
-
-### SolanaAdapter
-Implements `ChainAdapter` from `@argus/shared-types`. Uses `@solana/web3.js` Connection class.
-
-### Rate Limiter
-Token bucket algorithm. Configurable via `config/configuration.ts`:
-- `tokensPerInterval`: number of requests allowed per interval
-- `interval`: time window in milliseconds
-- `maxTokens`: maximum burst capacity
-
-### Circuit Breaker
-Three-state circuit breaker (CLOSED / OPEN / HALF_OPEN):
-- **CLOSED**: normal operation, requests pass through
-- **OPEN**: failures exceed threshold, requests are rejected immediately
-- **HALF_OPEN**: after cooldown, a single test request is allowed
-- Failure threshold and cooldown period are configurable
-
-### Consumer
-BullMQ consumer for the `solana:fetch` queue. Processes wallet fetch jobs by calling `SolanaAdapter` methods.
-
-## Testing
-- Backend: Jest with `--passWithNoTests` flag
-- E2E: supertest for HTTP endpoint testing
-- Run tests: `npm test` (root) or `npx jest` (per service)
-- Coverage: `npm run test:cov`
-
-## Docker
-- Local dev: `docker compose up -d` (uses docker-compose.yml)
-- Production: `docker compose -f docker-compose.prod.yml up -d`
-- Build: `docker compose build`
+See [docs/self-hosting.md](docs/self-hosting.md) for the full reference of all environment variables.
