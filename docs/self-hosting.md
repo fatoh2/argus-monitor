@@ -96,7 +96,7 @@ Argus Monitor consists of a React frontend, six NestJS microservices, a PostgreS
 
 ## Testing
 
-Argus Monitor includes a comprehensive test suite with **228 unit and integration tests** across all 5 microservices, plus **Playwright E2E tests** for the frontend.
+Argus Monitor includes a comprehensive test suite with **232 unit and integration tests** across all 5 microservices, plus **Playwright E2E tests** for the frontend.
 
 ### Running Backend Tests Locally
 
@@ -148,7 +148,7 @@ Two GitHub Actions workflows run on every PR:
 | api-service | ~120 | Auth, wallets, alert-rules, chains controllers/services; E2E supertest suite |
 | alert-service | ~30 | Alert engine (all rule types), app controller/service |
 | solana-adapter-service | ~30 | Solana adapter (mocked Helius), consumer, config |
-| notification-service | ~25 | Telegram service (send, format, error handling) |
+| notification-service | ~30 | Telegram service (send, format, error handling), NotificationConsumer (dispatch, retry, error handling) |
 | chain-indexer-service | ~15 | App controller, service, health check |
 | **frontend (E2E)** | **4 spec files** | Auth flow, wallet management, alert rules CRUD, WebSocket connectivity |
 
@@ -203,6 +203,7 @@ HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<your-helius-api-key>
 
 # Telegram (notifications)
 TELEGRAM_BOT_TOKEN=<your-bot-token>
+TELEGRAM_CHAT_ID=<your-telegram-chat-id>
 
 # Frontend
 VITE_API_URL=http://localhost:3000
