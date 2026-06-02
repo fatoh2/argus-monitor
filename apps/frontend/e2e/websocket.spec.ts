@@ -22,7 +22,7 @@ test.describe('WebSocket Live Updates', () => {
     // connection attempt doesn't break the UI.
     await expect(page.getByTestId('dashboard-page')).toBeVisible();
     await expect(page.getByTestId('wallets-section')).toBeVisible();
-    await expect(page.getByTestId('alert-rules-section')).toBeVisible();
+    await expect(page.getByTestId('transactions-section')).toBeVisible();
   });
 
   test('should handle WebSocket disconnection gracefully', async ({ page }) => {

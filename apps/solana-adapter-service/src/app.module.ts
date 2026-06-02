@@ -8,6 +8,7 @@ import { SolanaAdapter } from './adapter/solana.adapter';
 import { RateLimiterService } from './rate-limiter/rate-limiter.service';
 import { CircuitBreakerService } from './circuit-breaker/circuit-breaker.service';
 import { SolanaConsumer } from './consumer/solana.consumer';
+import { RpcMonitorService } from './rpc-monitor/rpc-monitor.service';
 import configuration from './config/configuration';
 import { QUEUES } from '@argus/shared-types';
 
@@ -53,6 +54,7 @@ import { QUEUES } from '@argus/shared-types';
       inject: [ConfigService],
     },
     SolanaConsumer,
+    RpcMonitorService,
   ],
 })
-export class AppModule {}
+export class AppModule { }
