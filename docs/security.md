@@ -127,6 +127,8 @@ All public endpoints are rate-limited to prevent abuse:
 - Auth endpoints: 10 requests per 60 seconds per IP (mitigates brute-force attacks)
 - Health endpoint: exempt from rate limiting
 
+Auth rate limiting is validated by an integration test (`apps/api-service/src/auth/__tests__/auth.controller.spec.ts`) that uses supertest to hit the full NestJS HTTP pipeline. The test makes 10 successful requests through the controller, then asserts the 11th returns HTTP 429 with a `retry-after` header. The test module configures a global limit of 100 to prove the controller-level `@Throttle({ default: { limit: 10, ttl: 60_000 } })` decorator is what enforces the 10-request cap — not the module-level config.
+
 ### Global Exception Filter
 
 - Production responses return only `{statusCode, message}` — no stack traces, timestamp, or path

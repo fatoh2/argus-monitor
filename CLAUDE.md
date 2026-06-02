@@ -21,6 +21,7 @@ apps/
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
+    src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests (rate limiting via supertest)
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
     src/adapter/            SolanaAdapter (ChainAdapter impl)
