@@ -19,10 +19,7 @@
 
 .DEFAULT_GOAL := help
 
-# ── Default environment variables ────────────────────────────────────────────
-# These are used by targets that connect to postgres/redis containers.
-# Override via shell environment or by passing on the command line:
-#   make psql POSTGRES_USER=admin POSTGRES_DB=mydb
+# Default environment variables
 POSTGRES_USER ?= argus
 POSTGRES_DB   ?= argus
 
@@ -38,28 +35,21 @@ up: ## docker compose up -d (start all services in background)
 down: ## docker compose down (stop all services)
 	docker compose down
 
-migrate: ## Run prisma migrations (development — uses migrate dev)
+migrate: ## Run prisma migrations (development - uses migrate dev)
 	docker compose run --rm api-service npx prisma migrate dev
 
-migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy)
+migrate-prod: ## Run prisma migrations (production-style - uses migrate deploy)
 	docker compose run --rm api-service npx prisma migrate deploy
 
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
-# ── check ────────────────────────────────────────────────────────────────────
-# Runs tsc --noEmit inside the api-service container for environment consistency.
-# $(PWD) is a Make variable that expands to the project root directory.
-# Source directories (apps/, packages/) and tsconfig files are mounted as
-# volumes so the container can access TypeScript source files for type-checking.
-# The api-service runner image includes node_modules (with tsc) from the build stage.
-check: ## TypeScript type-check (all apps) — runs inside Docker for consistency
-	docker compose run --rm --no-deps \
-		-v $(PWD)/apps:/app/apps \
-		-v $(PWD)/packages:/app/packages \
-		-v $(PWD)/tsconfig.json:/app/tsconfig.json \
-		-v $(PWD)/tsconfig.base.json:/app/tsconfig.base.json \
-		api-service npx tsc --noEmit --project tsconfig.json
+# check - runs tsc --noEmit directly on the host for speed and to avoid Docker
+# volume mounting issues (where host apps/ and packages/ dirs would overwrite
+# the container's built output and nested node_modules).
+# The host has all dependencies installed via yarn install at the project root.
+check: ## TypeScript type-check (all apps) - runs on host
+	npx tsc --noEmit
 
 test: ## Run all workspace tests (inside Docker for consistency)
 	docker compose run --rm api-service npm test
@@ -73,6 +63,8 @@ psql: ## Open psql shell in postgres (requires running containers)
 redis-cli: ## Open redis-cli in redis (requires running containers)
 	docker compose exec redis redis-cli
 
+# reset - full reset: tears down volumes, starts infra, waits for health,
+# migrates, seeds, then starts all services.
 reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), seed, start all
 	docker compose down -v
 	docker compose up -d postgres redis
@@ -112,58 +104,17 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), 
 	docker compose run --rm api-service npx prisma migrate deploy
 	docker compose run --rm api-service npx prisma db seed
 	docker compose up -d
-	@echo "✅ Stack is up and seeded!"
+	@echo "Stack is up and seeded!"
 
 
-# ── Test targets ──────────────────────────────────────────────────────────────
+# Test targets
 
-test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks, type-check, unit tests
-	@echo "=========================================="
-	@echo "  Argus Monitor — test-local"
-	@echo "=========================================="
+# test-local runs the full reset (infra, migrate, seed, start all), then waits
+# for all service health checks, runs type-check, and runs unit tests.
+# It delegates the reset logic to the reset target to avoid duplication.
+test-local: reset ## Full stack smoke test: reset stack, health checks, type-check, unit tests
 	@echo ""
-	@echo "📦 Step 1/7: Resetting stack..."
-	@docker compose down -v 2>/dev/null || true
-	@docker compose up -d postgres redis
-	@echo ""
-	@echo "⏳ Step 2/7: Waiting for postgres and redis to be healthy..."
-	@sleep 2
-	@for i in $$(seq 1 30); do \
-		if docker compose exec -T postgres pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB) >/dev/null 2>&1; then \
-			echo "  ✅ postgres is healthy!"; \
-			break; \
-		fi; \
-		if [ "$$i" = "30" ]; then \
-			echo "  ❌ FAIL: postgres failed to become healthy after 30 attempts."; \
-			docker compose logs postgres --tail 20; \
-			exit 1; \
-		fi; \
-		sleep 2; \
-	done
-	@sleep 2
-	@for i in $$(seq 1 30); do \
-		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
-			echo "  ✅ redis is healthy!"; \
-			break; \
-		fi; \
-		if [ "$$i" = "30" ]; then \
-			echo "  ❌ FAIL: redis failed to become healthy after 30 attempts."; \
-			docker compose logs redis --tail 20; \
-			exit 1; \
-		fi; \
-		sleep 2; \
-	done
-	@echo ""
-	@echo "📋 Step 3/7: Running migrations and seed..."
-	@docker compose run --rm api-service npx prisma migrate deploy || { echo "  ❌ FAIL: migrations failed"; exit 1; }
-	@echo "  ✅ migrations complete"
-	@docker compose run --rm api-service npx prisma db seed || { echo "  ❌ FAIL: seed failed"; exit 1; }
-	@echo "  ✅ seed complete"
-	@echo ""
-	@echo "🚀 Step 4/7: Starting all services..."
-	@docker compose up -d
-	@echo ""
-	@echo "🔍 Step 5/7: Waiting for all service health checks..."
+	@echo "Step 2/4: Waiting for all service health checks..."
 	@echo "  (waiting 10s for containers to initialize before polling)..."
 	@sleep 10
 	@for service in \
@@ -184,38 +135,38 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 			sleep 2; \
 		done; \
 		if [ "$$ok" = "1" ]; then \
-			echo "✅"; \
+			echo "OK"; \
 		else \
-			echo "❌"; \
-			echo "  ❌ FAIL: $$name did not become healthy after 60 seconds"; \
+			echo "FAIL"; \
+			echo "  FAIL: $$name did not become healthy after 60 seconds"; \
 			docker compose logs $$name --tail 20; \
 			exit 1; \
 		fi; \
 	done
 	@echo ""
-	@echo "🔧 Step 6/7: Running type check (make check)..."
-	@make check || { echo "  ❌ FAIL: type check failed"; exit 1; }
-	@echo "  ✅ type check passed"
+	@echo "Step 3/4: Running type check (make check)..."
+	@make check || { echo "  FAIL: type check failed"; exit 1; }
+	@echo "  type check passed"
 	@echo ""
-	@echo "🧪 Step 7/7: Running unit tests (make test)..."
-	@make test || { echo "  ❌ FAIL: unit tests failed"; exit 1; }
-	@echo "  ✅ unit tests passed"
+	@echo "Step 4/4: Running unit tests (make test)..."
+	@make test || { echo "  FAIL: unit tests failed"; exit 1; }
+	@echo "  unit tests passed"
 	@echo ""
 	@echo "=========================================="
-	@echo "  ✅ PASS — All checks passed!"
+	@echo "  PASS - All checks passed!"
 	@echo "=========================================="
 
 test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then runs e2e
 	@$(MAKE) test-local
 	@echo ""
-	@echo "🧪 Running e2e tests..."
-	@docker compose run --rm api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
-	@echo "  ✅ e2e tests passed"
+	@echo "Running e2e tests..."
+	@docker compose run --rm api-service npm run test:e2e || { echo "  FAIL: e2e tests failed"; exit 1; }
+	@echo "  e2e tests passed"
 	@echo ""
 	@echo "=========================================="
-	@echo "  ✅ PASS — All checks (incl. e2e) passed!"
+	@echo "  PASS - All checks (incl. e2e) passed!"
 	@echo "=========================================="
 	@echo ""
-	@echo "🧹 Cleaning up..."
+	@echo "Cleaning up..."
 	@docker compose down -v 2>/dev/null || true
-	@echo "  ✅ cleanup complete"
+	@echo "  cleanup complete"
