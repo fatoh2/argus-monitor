@@ -47,8 +47,13 @@ migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
-check: ## TypeScript type-check (all apps) — runs on host for full workspace coverage
-	npx tsc --noEmit
+check: ## TypeScript type-check (all apps) — runs inside Docker for consistency
+	docker compose run --rm --no-deps \
+		-v $(PWD)/apps:/app/apps \
+		-v $(PWD)/packages:/app/packages \
+		-v $(PWD)/tsconfig.json:/app/tsconfig.json \
+		-v $(PWD)/tsconfig.base.json:/app/tsconfig.base.json \
+		api-service npx tsc --noEmit
 
 test: ## Run all workspace tests (inside Docker for consistency)
 	docker compose run --rm api-service npm test
