@@ -65,7 +65,12 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Res({ passthrough: true }) res: Response) {
+  async logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+    const refreshToken: string | undefined = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (!refreshToken) {
+      // No refresh token to clear — still return success (idempotent)
+      return { message: 'Logged out successfully' };
+    }
     res.clearCookie(REFRESH_COOKIE_NAME, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
