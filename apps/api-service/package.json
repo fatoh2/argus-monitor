@@ -56,30 +56,13 @@
     "prettier": "^3.0.0",
     "prisma": "^5.0.0",
     "source-map-support": "^0.5.0",
-    "supertest": "^6.0.0",
+    "supertest": "^6.3.3",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.0.0",
     "tsconfig-paths": "^4.0.0",
     "typescript": "^5.5.0"
   },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "moduleNameMapper": {
-      "^@prisma/client$": "<rootDir>/../../../node_modules/@prisma/client/index.js"
-    }
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
