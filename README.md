@@ -143,7 +143,6 @@ Non-Prisma errors (e.g., `NotFoundException`, `ConflictException` thrown explici
 
 **Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
->>>>>>> origin/develop
 ## Secret Redaction
 
 Argus Monitor enforces a strict **no secrets in logs** policy across all services:

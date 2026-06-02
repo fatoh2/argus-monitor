@@ -261,10 +261,12 @@ model RevokedToken {
 ## Critical Data Rules
 - **NEVER** store on-chain amounts as `float` or `decimal` — always `BIGINT`
   - Solana: lamports (1 SOL = 1_000_000_000 lamports)
-
-## Testing
-- **Backend**: Jest + Testcontainers (PostgreSQL + Redis in Docker)
-- **Frontend**: Playwright (E2E)
+  - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
+  - Store `asset_decimals` separately for display
+- **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
+- **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
+- **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
+  - Index: `(wallet_id, captured_at DESC)` for chart queries
 
 ## Service Communication Rules
 - Services communicate via **BullMQ queues only** — no direct HTTP between services
@@ -283,7 +285,6 @@ model RevokedToken {
 - **ALWAYS** add `/metrics` Prometheus endpoint to every new NestJS service
 - **ALWAYS** run `npx prisma validate` before committing schema changes
 - **ALWAYS** run `npm test` before opening a PR
->>>>>>> origin/develop
 - **ALWAYS** run `npm run build` — no TypeScript compilation errors allowed
 
 ## Auth (MVP)
@@ -303,7 +304,6 @@ Auth is inside `api-service` using NestJS Guards + JWT + Passport.
 Title: [monitor] short description  OR  [frontend] short description
 Body: What changed, why, how to test, risks, checklist
 Branch: feature/issue-{number}-{short-description}
-```
 Base: develop (never main)
 ```
 
@@ -328,4 +328,3 @@ All env vars are documented in `.env.example` at the repo root. Key vars:
 | `REDIS_PORT` | all | No | 6379 |
 | `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
 | `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
->>>>>>> origin/develop
