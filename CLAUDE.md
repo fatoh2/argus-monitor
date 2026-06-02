@@ -19,14 +19,20 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 apps/
   frontend/                 React app
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
+    src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
+    src/adapter/            SolanaAdapter (ChainAdapter impl)
+    src/rate-limiter/       Token bucket rate limiter
+    src/circuit-breaker/    Three-state circuit breaker
+    src/consumer/           BullMQ solana:fetch consumer
+    src/config/             Helius, Redis, rate limiter, circuit breaker config
   alert-service/            Alert rule evaluation engine
   notification-service/     Telegram bot notifications
   rpc-monitor-service/      RPC health checks + circuit breaker
 packages/
   chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
-  shared-types/             Enums, queue names, job payload types
+  shared-types/             Enums, queue names, job payload types, ChainAdapter interface
 k8s/apps/                   Helm charts for all services
 docker-compose.yml          Local dev — all services + PostgreSQL + Redis
 docker-compose.prod.yml     Self-hosted production
@@ -36,11 +42,23 @@ docker-compose.prod.yml     Self-hosted production
 
 The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` prefix.
 
-### Auth (public)
-- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds)
-- `POST /api/auth/login` — login, returns `{accessToken, refreshToken, user}`
-- `POST /api/auth/refresh` — refresh access token with `{refreshToken}`
-- `POST /api/auth/me` — get current user profile (JWT protected)
+### Auth (public, except /me)
+- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds). Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/login` — login. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/refresh` — reads refresh token from `refresh_token` httpOnly cookie, verifies it, returns new `{accessToken, user}`, rotates refresh cookie
+- `POST /api/auth/logout` — revokes refresh token server-side (stores `jti` in `RevokedToken` table), clears `refresh_token` cookie
+- `POST /api/auth/me` — get current user profile (JWT protected, `JwtAuthGuard`)
+
+**Token TTLs:**
+- Access token: 15 minutes (hardcoded `15m`)
+- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation support
+
+**Cookie config for refresh_token:**
+- `httpOnly: true` — not accessible via JavaScript
+- `secure: true` in production (HTTPS only)
+- `sameSite: 'strict'` — CSRF protection
+- `path: '/api/auth'` — scoped to auth endpoints
+- `maxAge: 7 days`
 
 ### Wallets (JWT required, JwtAuthGuard)
 - `POST /api/wallets` — add wallet `{address, chain: "SOLANA"|"ETHEREUM"}`
@@ -84,6 +102,27 @@ The api-service registers a global `AllExceptionsFilter` in `main.ts` that catch
 ### Health
 - `GET /api/health` — returns `{status: "up"}`
 
+### Rate Limiting
+The api-service uses `@nestjs/throttler` v6.5.0 for global rate limiting to protect against abuse:
+
+- **Global default**: 100 requests per 60 seconds per IP — applies to all endpoints
+- **Auth endpoints** (`POST /api/auth/login`, `/register`, `/refresh`): **10 requests per 60 seconds** per IP (stricter limit via `@Throttle()` decorator)
+- **Health endpoint** (`GET /api/health`): **exempt** from rate limiting via `@SkipThrottle()`
+- **429 response**: Automatically returned with `Retry-After` header when limit exceeded
+- **Storage**: In-memory by default (single-instance). For multi-instance deployments, switch to Redis store.
+
+The `ThrottlerGuard` is registered as a global guard in `app.module.ts`. Individual endpoints can override the default limit using `@Throttle()` or opt out using `@SkipThrottle()`.
+
+**Source:** `apps/api-service/src/app.module.ts`, `apps/api-service/src/auth/auth.controller.ts`, `apps/api-service/src/health/health.controller.ts`
+
+### Global ValidationPipe
+The api-service applies a global `ValidationPipe` in `main.ts` with these settings:
+- **whitelist: true** — strips unknown properties from request bodies
+- **forbidNonWhitelisted: true** — throws 400 BadRequest on unknown properties
+- **transform: true** — coerces types (e.g. string to number for query params like `page=2`)
+
+This means all DTOs are enforced at runtime. Sending extra fields, missing required fields, or wrong types returns a 400 error instead of causing a 500.
+
 ### WebSocket Gateway
 - Namespace: `/ws`
 - Auth: JWT token in `auth.token` or `query.token`
@@ -97,29 +136,38 @@ model User {
   id           String      @id @default(uuid())
   email        String      @unique
   passwordHash String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   wallets      Wallet[]
   alertRules   AlertRule[]
 }
 
 model Wallet {
-  id         String      @id @default(uuid())
-  address    String      @unique
-  userId     String
-  chain      String      // "SOLANA" or "ETHEREUM"
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String      @id @default(uuid())
+  address   String
+  chain     String
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   alertRules AlertRule[]
+
+  @@unique([address, chain, userId])
   @@index([userId])
 }
 
 model AlertRule {
   id        String   @id @default(uuid())
-  userId    String
-  walletId  String
   chain     String
   type      String
   threshold String?
+  userId    String
+  walletId  String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([walletId])
 }
@@ -129,69 +177,42 @@ model Chain {
   name   String @unique
   rpcUrl String
 }
+
+model RevokedToken {
+  id        String   @id @default(uuid())
+  tokenJti  String   @unique // JWT ID (jti) — unique per token
+  expiresAt DateTime // When the token naturally expires; we can clean up after this
+  createdAt DateTime @default(now())
+
+  @@index([tokenJti])
+  @@index([expiresAt])
+}
 ```
 
 ## Critical Data Rules
 - **NEVER** store on-chain amounts as `float` or `decimal` — always `BIGINT`
   - Solana: lamports (1 SOL = 1_000_000_000 lamports)
-  - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
-  - Store `asset_decimals` separately for display
-- **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
-- **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
-- **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
-  - Index: `(wallet_id, captured_at DESC)` for chart queries
 
-## Service Communication Rules
-- Services communicate via **BullMQ queues only** — no direct HTTP between services
-- Queue names are defined in `packages/shared-types/src/queues/index.ts` — never hardcode
-- The chain-indexer pushes jobs → solana-adapter consumes them
-- solana-adapter writes to DB → alert-service reads via BullMQ or Postgres LISTEN
-
-## Non-Negotiable Rules
-- **NEVER** push directly to `main` or `develop` — always open a PR
-- **NEVER** commit `.env` files or API keys
-- **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
-- **NEVER** make direct HTTP calls between services — always BullMQ
-- **NEVER** use `any` type in TypeScript
-- **ALWAYS** write unit tests for: adapter methods, alert rule logic, data normalization
-- **ALWAYS** add `/metrics` Prometheus endpoint to every new NestJS service
-- **ALWAYS** run `npx prisma validate` before committing schema changes
-- **ALWAYS** run `npm test` before opening a PR
+## Testing
+- **Backend**: Jest + Testcontainers (PostgreSQL + Redis in Docker)
+- **Frontend**: Playwright (E2E)
 - **ALWAYS** run `npm run build` — no TypeScript compilation errors allowed
 
 ## Auth (MVP)
 Auth is inside `api-service` using NestJS Guards + JWT + Passport.
-- JWT strategy: `passport-jwt` with Bearer token extraction
+- JWT strategy: `passport-jwt` with Bearer token extraction (access token)
+- Refresh token: httpOnly cookie (`refresh_token`) with `jti` for revocation
 - Global `JwtAuthGuard` applied per-controller
 - Passwords: bcrypt with 12 salt rounds
-- Access token: configurable expiry (default 1h), refresh token: 7d
+- Access token: 15 minutes (hardcoded `15m`)
+- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation
+- Revoked tokens stored in `RevokedToken` table (by `jti`)
+- Cookie parser middleware registered in `main.ts`
 - Do NOT create a separate auth-service until explicitly instructed.
 
 ## PR Format
 ```
 Title: [monitor] short description  OR  [frontend] short description
-
-Body:
-## What changed
-<link to issue>
-
-## How to test
-<steps to verify locally with docker-compose>
-
-## Checklist
-- [ ] npm test passes
-- [ ] npm run build passes
-- [ ] No TypeScript errors
-- [ ] No mocked DB in integration tests
-- [ ] Prisma migration included? (yes/no)
-- [ ] BullMQ queue changes updated in shared-types? (yes/no)
-- [ ] Breaking API changes? (yes/no — escalate if yes)
-- [ ] /metrics endpoint added to new services? (yes/no)
+Body: What changed, why, how to test, risks, checklist
+Branch: feature/issue-{number}-{short-description}
 ```
-
-## Escalate to PM when
-- Breaking changes to OpenAPI spec
-- New BullMQ queue names (must update shared-types and notify all consumer services)
-- Prisma migration that alters or drops existing columns
-- Any change to JWT auth configuration
-- Helius API key rotation needed

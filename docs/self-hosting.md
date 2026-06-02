@@ -47,9 +47,13 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
 - **Secure your `.env` file**: Never commit it to version control. Set strict file permissions.
 - **Regularly update dependencies**: Keep Docker images and system packages up-to-date.
 - **Monitor logs**: Review application and server logs for suspicious activity.
+- **Secret Redaction**: A `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) automatically masks passwords, tokens, API keys, and PII before they reach log output. The global exception filter redacts request bodies and query params on 5xx errors. A linting test (`log-secrets-lint.spec.ts`) enforces that no log call references a secret environment variable. All services use NestJS `Logger` instead of `console.log`.
 - **Reverse proxy**: The API service should only be accessible via a reverse proxy (nginx, Caddy) with SSL termination. Do not expose services directly to the public internet.
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.
+- **Global exception filter**: In production, the API service strips stack traces from error responses. Internal errors return `{ statusCode, message }` only. All 5xx errors are logged server-side with request context (request ID, user ID, URL). Prisma errors are mapped to proper HTTP codes (409 Conflict, 404 Not Found).
+- **Rate limiting**: All API endpoints are rate-limited to prevent abuse. Auth endpoints have a stricter limit (10 req/60s) to mitigate brute-force attacks. The health endpoint is exempt to allow monitoring tools uninterrupted access.
+- **JWT token security**: Access tokens are short-lived (15 minutes). Refresh tokens are stored as httpOnly cookies with `sameSite: 'strict'` for CSRF protection. Refresh tokens can be revoked server-side via the `/logout` endpoint.
 
 ## Setup Steps
 
@@ -75,9 +79,16 @@ Below is a reference of all environment variables:
 NODE_ENV=production
 
 # ---- API Service (port 3000) ----
+# Rate Limiting (global for API service)
+API_RATE_LIMIT_TTL=60000
+API_RATE_LIMIT_LIMIT=100
+
+# Rate Limiting (auth endpoints)
+AUTH_RATE_LIMIT_TTL=60000
+AUTH_RATE_LIMIT_LIMIT=10
+
 API_SERVICE_PORT=3000
 JWT_SECRET=generate-a-strong-random-secret
-JWT_EXPIRATION_TIME=60s
 
 # ---- Chain Indexer Service (port 3001) ----
 CHAIN_INDEXER_PORT=3001
@@ -122,6 +133,9 @@ POSTGRES_PORT=5432
 # ---- Redis ----
 REDIS_HOST=redis
 REDIS_PORT=6379
+
+# ---- Security ----
+ALLOWED_ORIGINS=https://your-frontend-domain.com
 ```
 
 **Important:**
@@ -129,7 +143,9 @@ REDIS_PORT=6379
 - Set a strong `POSTGRES_PASSWORD`
 - Set your `HELIUS_API_KEY` — required for Solana monitoring
 - Set `TELEGRAM_BOT_TOKEN` if using Telegram notifications
+- Set `ALLOWED_ORIGINS` to your frontend domain(s), comma-separated for multiple origins
 - The `DATABASE_URL` uses service names (`postgres`, `redis`) when running with Docker Compose
+- **JWT token TTLs are hardcoded**: Access tokens expire in 15 minutes, refresh tokens in 7 days. The `JWT_EXPIRATION_TIME` env var is no longer used.
 - Rate limiter and circuit breaker settings are optional — defaults are safe for most deployments
 - Circuit breaker retry and caching settings are also optional — defaults provide 3 retries with 500ms/1s/2s backoff
 
@@ -147,7 +163,7 @@ This starts all services: PostgreSQL, Redis, API service, chain indexer, Solana 
 docker compose exec api-service npx prisma migrate deploy
 ```
 
-This creates the required tables: `User`, `Wallet`, `AlertRule`, and `Chain`.
+This creates the required tables: `User`, `Wallet`, `AlertRule`, `Chain`, and `RevokedToken`.
 
 ### 5. Verify the Deployment
 
@@ -158,26 +174,34 @@ curl http://localhost:3000/api/health
 # Register a test user
 curl -X POST http://localhost:3000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"your-strong-password"}'
+  -d '{"email":"test@example.com","password":"securepassword123"}'
+
+# Login
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"securepassword123"}'
+
+# Access the API with the access token
+curl http://localhost:3000/api/auth/me \
+  -H "Authorization: Bearer <access-token>"
 ```
 
-### 6. Set Up a Reverse Proxy (Recommended)
+### 6. Set Up SSL (Recommended)
+
+Use a reverse proxy (nginx, Caddy, or Traefik) with Let's Encrypt for SSL termination. The `secure: true` flag on the refresh token cookie requires HTTPS.
 
 Example nginx configuration:
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name monitor.example.com;
+    server_name api.yourdomain.com;
 
-    ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.example.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+    location /api/ {
+        proxy_pass http://localhost:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -186,62 +210,74 @@ server {
 }
 ```
 
-The `proxy_set_header Upgrade` and `Connection` lines are required for WebSocket support.
+## API Endpoints
 
-## Service Ports
+### Auth
 
-| Service | Internal Port | Description |
-|---------|---------------|-------------|
-| API Service | 3000 | Main API (expose via reverse proxy) |
-| Chain Indexer | 3001 | Internal — BullMQ job scheduler |
-| Solana Adapter | 3002 | Internal — Helius RPC integration |
-| Alert Service | 3003 | Internal — rule evaluation |
-| Notification Service | 3004 | Internal — Telegram bot |
-| RPC Monitor | 3005 | Internal — RPC health checks |
-| PostgreSQL | 5432 | Internal — database |
-| Redis | 6379 | Internal — queue & cache |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/auth/register` | Public | Register with email + password. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie |
+| `POST` | `/api/auth/login` | Public | Login. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie |
+| `POST` | `/api/auth/refresh` | Cookie | Reads `refresh_token` cookie, returns new `{accessToken, user}`, rotates refresh cookie |
+| `POST` | `/api/auth/logout` | Cookie | Revokes refresh token, clears cookie |
+| `POST` | `/api/auth/me` | Bearer JWT | Returns current user profile |
 
-Only the API Service (port 3000) should be exposed to the internet via a reverse proxy.
+### Wallets (JWT required)
 
-## Solana Adapter Service Details
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/wallets` | Add wallet `{address, chain}` |
+| `GET` | `/api/wallets` | List user's wallets |
+| `GET` | `/api/wallets/:id` | Get single wallet |
+| `DELETE` | `/api/wallets/:id` | Delete wallet |
 
-The `solana-adapter-service` provides Helius RPC integration with built-in resilience patterns:
+### Alert Rules (JWT required)
 
-### Rate Limiter
-- Token bucket algorithm — limits requests to `RATE_LIMITER_MAX_RPS` per second
-- Exponential backoff with jitter (±25%) on retries
-- Configurable max retries, base delay, and max delay
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/alert-rules` | Create rule `{walletId, chain, type, threshold?}` |
+| `GET` | `/api/alert-rules` | List user's rules |
+| `GET` | `/api/alert-rules/:id` | Get single rule |
+| `DELETE` | `/api/alert-rules/:id` | Delete rule |
 
-### Circuit Breaker
-- Three-state circuit breaker: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
-- Configurable failure threshold, success threshold, and timeout
-- **Retry**: exponential backoff with jitter — attempt 1 = 500ms, attempt 2 = 1000ms, attempt 3 = 2000ms
-- **Caching**: in-memory cache of successful RPC responses, keyed by operation type (`balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`)
-- **Degraded events**: when circuit opens, emits `RpcDegradedEvent` via RxJS `Subject` with endpoint, error code, and timestamp
-- When circuit is OPEN and a cached value exists, returns cached value instead of throwing
-- Endpoint URLs are sanitized (API key stripped) before logging
+### Chains
 
-## Updating
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/chains` | Create chain `{name, rpcUrl}` |
+| `GET` | `/api/chains` | List all chains |
+| `GET` | `/api/chains/:id` | Get single chain |
+| `DELETE` | `/api/chains/:id` | Delete chain |
 
-```bash
-cd /opt/argus-monitor
-git pull
-docker compose down
-docker compose build
-docker compose up -d
-docker compose exec api-service npx prisma migrate deploy
-```
+### Health
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check — returns `{status: "up"}` |
 
 ## Troubleshooting
 
-### Database connection refused
-Ensure PostgreSQL is healthy: `docker compose ps postgres`
+### Common Issues
 
-### JWT authentication fails
-Verify `JWT_SECRET` is set and consistent across restarts.
+**"Refresh token not found" error**
+- Ensure the frontend sends credentials (`withCredentials: true` or `credentials: 'include'`) on refresh/logout requests
+- Verify the cookie domain/path matches the request URL
+- Check that HTTPS is configured (cookies with `secure: true` won't be sent over HTTP)
 
-### WebSocket connections fail
-Ensure your reverse proxy supports WebSocket upgrades (see nginx config above).
+**"Token has been revoked" error**
+- The refresh token was used after logout — the client needs to re-authenticate
+- This is expected behavior after logout
 
-### Helius API errors
-Verify `HELIUS_API_KEY` is valid and has sufficient quota.
+**"Invalid or expired refresh token"**
+- The refresh token has expired (after 7 days) or is malformed
+- The user needs to log in again
+
+**Database connection errors**
+- Verify PostgreSQL is running: `docker compose ps postgres`
+- Check `DATABASE_URL` in `.env`
+- Ensure migrations have been applied
+
+**Authentication failures**
+- Verify the JWT token is valid and not expired
+- Check the API service logs for authentication errors
+- Ensure the `JWT_SECRET` is consistent across all API service instances
