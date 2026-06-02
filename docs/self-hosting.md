@@ -4,7 +4,15 @@ This guide walks you through self-hosting Argus Monitor in production.
 
 ## Local Development
 
-For local development, use the `Makefile` at the project root:
+For a quick one-command setup on a fresh clone, run:
+
+```bash
+bash scripts/setup.sh
+```
+
+This checks prerequisites (Node.js >= 18, Docker running), installs npm dependencies, creates a `.env` file from `.env.example`, pulls Docker images, and runs Prisma migrations.
+
+After setup, use the `Makefile` at the project root for day-to-day development:
 
 ```bash
 make up          # start all services
