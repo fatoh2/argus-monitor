@@ -1,0 +1,1 @@
+## Enhanced Helius RPC Calls\n\nThe Solana adapter now incorporates a circuit breaker, automatic retries, and caching for Helius RPC calls. This significantly improves the reliability and performance of data fetching operations by gracefully handling RPC service degradations and reducing redundant requests.
