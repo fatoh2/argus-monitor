@@ -26,9 +26,12 @@ describe('AuthController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       imports: [
+        // Set a high global limit (100) so the throttling test proves the
+        // controller's @Throttle({ default: { limit: 10 } }) decorator is
+        // what actually enforces the 10-request cap — not the module config.
         ThrottlerModule.forRoot([{
           ttl: 60000,
-          limit: 10,
+          limit: 100,
         }]),
       ],
       controllers: [AuthController],
@@ -121,7 +124,10 @@ describe('AuthController', () => {
     });
 
     it('should return 429 after 10 login attempts within 60 seconds', async () => {
-      // Use supertest to hit the full NestJS pipeline (guards included)
+      // Use supertest to hit the full NestJS pipeline (guards included).
+      // The controller has @Throttle({ default: { limit: 10, ttl: 60_000 } })
+      // on the login endpoint, so the 11th request in 60s gets throttled.
+      // The test module's global limit is 100 — the decorator's 10 wins.
       const loginPayload = {
         email: 'test@example.com',
         password: 'password123',
@@ -147,8 +153,16 @@ describe('AuthController', () => {
         .send(loginPayload)
         .expect(429);
 
-      expect(response.body.message).toBe('ThrottlerException: Too Many Requests');
+      // NestJS serialises ThrottlerException as { message, statusCode }
+      expect(response.body).toMatchObject({
+        message: 'ThrottlerException: Too Many Requests',
+        statusCode: 429,
+      });
+      // ThrottlerGuard sets retry-after header on 429 responses
       expect(response.headers).toHaveProperty('retry-after');
+      const retryAfter = Number(response.headers['retry-after']);
+      expect(Number.isNaN(retryAfter)).toBe(false);
+      expect(retryAfter).toBeGreaterThan(0);
     });
   });
 
