@@ -50,6 +50,7 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
 - **Reverse proxy**: The API service should only be accessible via a reverse proxy (nginx, Caddy) with SSL termination. Do not expose services directly to the public internet.
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.
+- **Global exception filter**: In production, the API service strips stack traces from error responses. Internal errors return `{ statusCode, message }` only. All 5xx errors are logged server-side with request context (request ID, user ID, URL). Prisma errors are mapped to proper HTTP codes (409 Conflict, 404 Not Found).
 
 ## Setup Steps
 
