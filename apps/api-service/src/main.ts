@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -18,6 +18,7 @@ function parseAllowedOrigins(): string[] | string {
 }
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
   // Security headers — sets CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.
@@ -51,6 +52,6 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`API service running on port ${port}`);
+  logger.log(`API service running on port ${port}`);
 }
 bootstrap();

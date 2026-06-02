@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { redact } from '../logger/redact';
 
 interface ErrorResponse {
   statusCode: number;
@@ -58,14 +59,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = 'Internal server error';
     }
 
-    // Log 5xx errors with context
+    // Log 5xx errors with context — redact sensitive data from request
     if (statusCode >= 500) {
       const requestId = (request as any).requestId || 'unknown';
       const userId = (request as any).user?.id || 'anonymous';
       const stack = exception instanceof Error ? exception.stack : undefined;
 
+      // Redact the request body and query params to prevent secret exposure
+      const redactedBody = request.body ? redact(request.body) : undefined;
+      const redactedQuery = request.query ? redact(request.query) : undefined;
+
       this.logger.error(
-        `[${requestId}] [user:${userId}] ${request.method} ${request.url} - ${statusCode}: ${message}`,
+        `[${requestId}] [user:${userId}] ${request.method} ${request.url} - ${statusCode}: ${message}` +
+          (redactedBody ? ` body=${JSON.stringify(redactedBody)}` : '') +
+          (redactedQuery ? ` query=${JSON.stringify(redactedQuery)}` : ''),
         stack,
       );
     }
