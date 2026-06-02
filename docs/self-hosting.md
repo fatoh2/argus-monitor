@@ -47,6 +47,7 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
 - **Secure your `.env` file**: Never commit it to version control. Set strict file permissions.
 - **Regularly update dependencies**: Keep Docker images and system packages up-to-date.
 - **Monitor logs**: Review application and server logs for suspicious activity.
+- **Secret Redaction**: Ensure no secrets, tokens, or PII are logged. Sensitive environment variables are checked by a linting test, and a `redact()` utility is available to mask sensitive data in logs.
 - **Reverse proxy**: The API service should only be accessible via a reverse proxy (nginx, Caddy) with SSL termination. Do not expose services directly to the public internet.
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.

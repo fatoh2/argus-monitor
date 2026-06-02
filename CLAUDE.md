@@ -258,6 +258,7 @@ model RevokedToken {
 
 ## Non-Negotiable Rules
 - **NEVER** push directly to `main` or `develop` — always open a PR
+- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) enforces this policy.
 - **NEVER** commit `.env` files or API keys
 - **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
 - **NEVER** make direct HTTP calls between services — always BullMQ
