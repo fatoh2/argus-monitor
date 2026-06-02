@@ -129,59 +129,7 @@ This means all DTOs are enforced at runtime. Sending extra fields, missing requi
 - Events: `subscribe-wallet`, `unsubscribe-wallet` (client→server)
 - Emits: `wallet_update`, `alert_triggered`, `connected` (server→client)
 
-## Solana Adapter Service Details
-
-The `solana-adapter-service` (port 3002) provides Helius RPC integration.
-
-### SolanaAdapter (`src/adapter/solana.adapter.ts`)
-Implements `ChainAdapter` interface for Solana:
-
-- `getNativeBalance(address)` — returns SOL balance in lamports (BIGINT)
-- `getTokenBalances(address)` — returns SPL token balances, skips zero-balance tokens
-- `getRecentTransactions(address, limit=20)` — returns last N transactions normalized to `Transaction` interface
-- `checkRpcHealth(endpoint)` — latency + block height health check
-- Transaction normalization: parses system program transfers (SOL) and token program transfers (SPL)
-
-### Rate Limiter (`src/rate-limiter/rate-limiter.service.ts`)
-Token bucket algorithm protecting Helius RPC from excessive requests:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Max RPS | `RATE_LIMITER_MAX_RPS` | 10 | Max requests per second |
-| Max retries | `RATE_LIMITER_MAX_RETRIES` | 3 | Retry attempts on rate limit |
-| Base delay | `RATE_LIMITER_BASE_DELAY_MS` | 1000 | Initial backoff delay (ms) |
-| Max delay | `RATE_LIMITER_MAX_DELAY_MS` | 30000 | Maximum backoff delay (ms) |
-
-### Circuit Breaker (`src/circuit-breaker/circuit-breaker.service.ts`)
-Three-state circuit breaker (`CLOSED → OPEN → HALF_OPEN`) that prevents cascading failures when Helius RPC is degraded:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open |
-| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Consecutive successes to close |
-| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Wait before half-open (ms) |
-| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts when circuit is closed |
-| Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
-| Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
-
-### Consumer (`src/consumer/solana.consumer.ts`)
-BullMQ consumer for the `solana:fetch` queue. Processes jobs from the chain-indexer:
-
-- **Job payload**: `{walletId, address, monitorType}`
-- **Flow**: Fetch data via SolanaAdapter → write to DB → push `alert:evaluation` job
-- **Error handling**: Failed jobs go to dead-letter queue after max retries
-
-### Caching
-In-memory cache with TTL to reduce redundant RPC calls:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Cache TTL | `CACHE_TTL_MS` | 30000 | Cache duration (ms) |
-| Max entries | `CACHE_MAX_ENTRIES` | 1000 | Max cached items |
-
-## Prisma Schema
-
-### Models
+## Prisma Schema (api-service)
 
 ```prisma
 model User {
@@ -244,30 +192,10 @@ model RevokedToken {
 ## Critical Data Rules
 - **NEVER** store on-chain amounts as `float` or `decimal` — always `BIGINT`
   - Solana: lamports (1 SOL = 1_000_000_000 lamports)
-  - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
-  - Store `asset_decimals` separately for display
-- **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
-- **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
-- **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
-  - Index: `(wallet_id, captured_at DESC)` for chart queries
 
-## Service Communication Rules
-- Services communicate via **BullMQ queues only** — no direct HTTP between services
-- Queue names are defined in `packages/shared-types/src/queues/index.ts` — never hardcode
-- The chain-indexer pushes jobs → solana-adapter consumes them
-- solana-adapter writes to DB → alert-service reads via BullMQ or Postgres LISTEN
-
-## Non-Negotiable Rules
-- **NEVER** push directly to `main` or `develop` — always open a PR
-- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) scans all source files for log calls referencing secret env vars and enforces this policy.
-- **NEVER** commit `.env` files or API keys
-- **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
-- **NEVER** make direct HTTP calls between services — always BullMQ
-- **NEVER** use `any` type in TypeScript
-- **ALWAYS** write unit tests for: adapter methods, alert rule logic, data normalization
-- **ALWAYS** add `/metrics` Prometheus endpoint to every new NestJS service
-- **ALWAYS** run `npx prisma validate` before committing schema changes
-- **ALWAYS** run `npm test` before opening a PR
+## Testing
+- **Backend**: Jest + Testcontainers (PostgreSQL + Redis in Docker)
+- **Frontend**: Playwright (E2E)
 - **ALWAYS** run `npm run build` — no TypeScript compilation errors allowed
 
 ## Auth (MVP)
@@ -287,27 +215,4 @@ Auth is inside `api-service` using NestJS Guards + JWT + Passport.
 Title: [monitor] short description  OR  [frontend] short description
 Body: What changed, why, how to test, risks, checklist
 Branch: feature/issue-{number}-{short-description}
-Base: develop (never main)
 ```
-
-## Environment Variables
-
-All env vars are documented in `.env.example` at the repo root. Key vars:
-
-| Variable | Service | Required | Default |
-|----------|---------|----------|---------|
-| `HELIUS_API_KEY` | solana-adapter | Yes | — |
-| `HELIUS_RPC_URL` | solana-adapter | No | `https://mainnet.helius-rpc.com/?api-key=` |
-| `RATE_LIMITER_MAX_RPS` | solana-adapter | No | 10 |
-| `RATE_LIMITER_MAX_RETRIES` | solana-adapter | No | 3 |
-| `RATE_LIMITER_BASE_DELAY_MS` | solana-adapter | No | 1000 |
-| `RATE_LIMITER_MAX_DELAY_MS` | solana-adapter | No | 30000 |
-| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | solana-adapter | No | 5 |
-| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | solana-adapter | No | 3 |
-| `CIRCUIT_BREAKER_TIMEOUT_MS` | solana-adapter | No | 30000 |
-| `JWT_SECRET` | api-service | Yes | — |
-| `DATABASE_URL` | api-service | Yes | — |
-| `REDIS_HOST` | all | No | localhost |
-| `REDIS_PORT` | all | No | 6379 |
-| `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
-| `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
