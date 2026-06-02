@@ -4,7 +4,7 @@ This guide walks you through self-hosting Argus Monitor in production.
 
 ## Architecture Overview
 
-Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.
+Argus Monitor consists of five NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────────┐
@@ -28,11 +28,6 @@ Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a
                                     │ Service          │
                                     │ (port 3004)      │
                                     └──────────────────┘
-
-┌──────────────────┐
-│ RPC Monitor      │
-│ (port 3005)      │
-└──────────────────┘
 ```
 
 ## Prerequisites
@@ -119,9 +114,6 @@ ALERT_SERVICE_PORT=3003
 NOTIFICATION_SERVICE_PORT=3004
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 
-# ---- RPC Monitor Service (port 3005) ----
-RPC_MONITOR_PORT=3005
-
 # ---- PostgreSQL ----
 DATABASE_URL=postgresql://argus:your-db-password@postgres:5432/argus
 POSTGRES_DB=argus
@@ -165,50 +157,7 @@ docker compose exec api-service npx prisma migrate deploy
 
 This creates the required tables: `User`, `Wallet`, `AlertRule`, `Chain`, and `RevokedToken`.
 
-### 5. (Optional) Seed Test Data
-
-For development or testing environments, you can seed the database with sample data:
-
-```bash
-docker compose exec api-service npx prisma db seed
-```
-
-This creates:
-
-| Item | Details |
-|------|---------|
-| **Test user** | `test@argusmonitor.io` / `testpassword123` |
-| **Test wallets** | 3 Solana devnet addresses (no real funds) |
-| **Alert rules** | `large_tx` (threshold: 1 SOL) on wallet 0, `balance_change` on wallet 1 |
-| **Chain entry** | Solana devnet (`https://api.devnet.solana.com`) |
-
-Login with `test@argusmonitor.io` / `testpassword123` to explore the API immediately.
-
-> ⚠️ **Production note:** Do not seed in production — the seed data is for local development only. The seed script clears all existing data before inserting.
-
-**Source:** `apps/api-service/prisma/seed.ts`
-
-### 6. Verify the Deployment
-
-### 5. Seed Test Data (Optional, Local Dev Only)
-
-For local development, you can seed the database with test data:
-
-```bash
-docker compose exec api-service npx prisma db seed
-```
-
-This creates:
-- **Test user:** `test@argusmonitor.io` / `testpassword123`
-- **3 Solana devnet wallet addresses** (no real funds)
-- **2 alert rules:** `large_tx` (threshold: 1 SOL) and `balance_change` (any change)
-- **1 chain entry:** Solana devnet RPC
-
-**Do not run this in production** — it clears existing data before seeding.
-
-**Source:** `apps/api-service/prisma/seed.ts`
-
-### 6. Verify the Deployment
+### 5. Verify the Deployment
 
 ```bash
 # Health check
@@ -229,7 +178,7 @@ curl http://localhost:3000/api/auth/me \
   -H "Authorization: Bearer <access-token>"
 ```
 
-### 7. Set Up SSL (Recommended)
+### 6. Set Up SSL (Recommended)
 
 Use a reverse proxy (nginx, Caddy, or Traefik) with Let's Encrypt for SSL termination. The `secure: true` flag on the refresh token cookie requires HTTPS.
 
