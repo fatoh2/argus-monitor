@@ -27,6 +27,14 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 
 Argus Monitor includes a `Makefile` with common development commands to streamline local workflows. All commands run via Docker Compose for consistency.
 
+For a one-command local environment setup, run:
+
+```bash
+bash scripts/setup.sh
+```
+
+This checks prerequisites (Node.js >= 18, Docker running), installs npm dependencies, creates a `.env` file from `.env.example`, pulls Docker images, and runs Prisma migrations.
+
 ### Available Commands
 
 | Command | Description |
@@ -43,14 +51,15 @@ Argus Monitor includes a `Makefile` with common development commands to streamli
 | `make psql` | Open psql shell in postgres (requires running containers) |
 | `make redis-cli` | Open redis-cli in redis (requires running containers) |
 | `make reset` | Full reset: down -v, start infra, migrate, seed, start all |
+| `bash scripts/setup.sh` | One-command local dev setup (prerequisites check, deps install, .env, migrations) |
 
 ### Quick Start
 
 ```bash
-make up          # start all services
-make migrate     # run migrations
-make seed        # seed database
-make check       # verify TypeScript compiles
+bash scripts/setup.sh   # one-command setup (prerequisites, deps, .env, migrations)
+make up                  # start all services
+make seed                # seed database
+make check               # verify TypeScript compiles
 ```
 
 ### Full Reset

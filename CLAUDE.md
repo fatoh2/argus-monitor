@@ -13,7 +13,7 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 - **Chain**: Solana via Helius API + @solana/web3.js
 - **Testing**: Jest + ts-jest + supertest (backend), Playwright (E2E)
 - **CI**: GitHub Actions (test.yml — PostgreSQL + Redis services on every PR; playwright.yml — E2E on frontend changes)
-- **Local dev**: docker-compose.yml, Makefile (see `make help`)
+- **Local dev**: docker-compose.yml, Makefile (see `make help`), scripts/setup.sh (one-command setup)
 
 ## Repo Structure
 ```
