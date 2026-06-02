@@ -12,7 +12,7 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 - **Real-time**: NestJS WebSocket Gateway + Socket.io
 - **Chain**: Solana via Helius API + @solana/web3.js
 - **Testing**: Jest + Testcontainers (backend), Playwright (E2E)
-- **Local dev**: docker-compose.yml
+- **Local dev**: docker-compose.yml, Makefile (see `make help`)
 
 ## Repo Structure
 ```
