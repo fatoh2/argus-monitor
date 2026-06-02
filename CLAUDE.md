@@ -62,6 +62,25 @@ The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` 
 - `GET /api/chains/:id` — get single chain (UUID)
 - `DELETE /api/chains/:id` — delete chain
 
+### Global Exception Filter
+The api-service registers a global `AllExceptionsFilter` in `main.ts` that catches all unhandled exceptions:
+
+- **HttpException** — passes through the original status code and message
+- **PrismaClientKnownRequestError** — mapped to HTTP status codes:
+  - `P2002` (unique constraint) → `409 Conflict` with message `"Resource already exists"`
+  - `P2025` (record not found) → `404 Not Found` with message `"Resource not found"`
+  - Other Prisma errors → `500 Internal Server Error` with message `"Internal server error"`
+- **All other exceptions** → `500 Internal Server Error` with message `"Internal server error"`
+
+**Production behavior** (`NODE_ENV=production`):
+- Response body: `{ statusCode, message }` only — NO stack trace
+- All 5xx errors are logged with: request ID, user ID, HTTP method, URL, and stack trace
+
+**Development behavior** (any other `NODE_ENV`):
+- Response body includes `stack` field for debugging
+
+**Source:** `apps/api-service/src/common/filters/all-exceptions.filter.ts`
+
 ### Health
 - `GET /api/health` — returns `{status: "up"}`
 

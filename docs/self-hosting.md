@@ -87,6 +87,20 @@ SOLANA_ADAPTER_PORT=3002
 HELIUS_API_KEY=your-helius-api-key
 HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=your-helius-api-key
 
+# Rate limiter (token bucket algorithm)
+RATE_LIMITER_MAX_RPS=10
+RATE_LIMITER_MAX_RETRIES=3
+RATE_LIMITER_BASE_DELAY_MS=1000
+RATE_LIMITER_MAX_DELAY_MS=30000
+
+# Circuit breaker (three-state: CLOSED → OPEN → HALF_OPEN)
+CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+CIRCUIT_BREAKER_SUCCESS_THRESHOLD=3
+CIRCUIT_BREAKER_TIMEOUT_MS=30000
+CIRCUIT_BREAKER_MAX_RETRIES=3
+CIRCUIT_BREAKER_BASE_DELAY_MS=500
+CIRCUIT_BREAKER_MAX_DELAY_MS=2000
+
 # ---- Alert Service (port 3003) ----
 ALERT_SERVICE_PORT=3003
 
@@ -116,6 +130,8 @@ REDIS_PORT=6379
 - Set your `HELIUS_API_KEY` — required for Solana monitoring
 - Set `TELEGRAM_BOT_TOKEN` if using Telegram notifications
 - The `DATABASE_URL` uses service names (`postgres`, `redis`) when running with Docker Compose
+- Rate limiter and circuit breaker settings are optional — defaults are safe for most deployments
+- Circuit breaker retry and caching settings are also optional — defaults provide 3 retries with 500ms/1s/2s backoff
 
 ### 3. Start the Stack
 
@@ -186,6 +202,24 @@ The `proxy_set_header Upgrade` and `Connection` lines are required for WebSocket
 | Redis | 6379 | Internal — queue & cache |
 
 Only the API Service (port 3000) should be exposed to the internet via a reverse proxy.
+
+## Solana Adapter Service Details
+
+The `solana-adapter-service` provides Helius RPC integration with built-in resilience patterns:
+
+### Rate Limiter
+- Token bucket algorithm — limits requests to `RATE_LIMITER_MAX_RPS` per second
+- Exponential backoff with jitter (±25%) on retries
+- Configurable max retries, base delay, and max delay
+
+### Circuit Breaker
+- Three-state circuit breaker: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
+- Configurable failure threshold, success threshold, and timeout
+- **Retry**: exponential backoff with jitter — attempt 1 = 500ms, attempt 2 = 1000ms, attempt 3 = 2000ms
+- **Caching**: in-memory cache of successful RPC responses, keyed by operation type (`balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`)
+- **Degraded events**: when circuit opens, emits `RpcDegradedEvent` via RxJS `Subject` with endpoint, error code, and timestamp
+- When circuit is OPEN and a cached value exists, returns cached value instead of throwing
+- Endpoint URLs are sanitized (API key stripped) before logging
 
 ## Updating
 
