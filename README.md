@@ -13,14 +13,14 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Telegram Notifications** — BullMQ consumer dispatches triggered alerts via Telegram Bot API with exponential backoff retry (5 attempts, 2s initial delay)
 - **Real-time WebSocket Gateway** — authenticated connections, wallet updates, alert triggers (Socket.io with auto-reconnect)
 - **Chain Management** — admin CRUD for supported blockchain networks
-- **Solana Blockchain Adapter** — Helius RPC integration with rate limiter & circuit breaker
+- **Solana Blockchain Adapter** — Helius RPC integration with rate limiter, circuit breaker, and periodic RPC health monitoring (latency, block height, status change events via RxJS)
 - **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
 - **Health Checks** — `/api/health` endpoint for all services
 - **Global Exception Filter** — In production, unhandled errors return only `{statusCode, message}` (no stack traces, timestamp, or path). In development, responses include `timestamp`, `path`, and `stack` for debugging. Prisma errors are mapped to specific HTTP status codes: `P2002` (unique constraint) to 409 Conflict, `P2025` (record not found) to 404 Not Found, `P2003` (foreign key constraint) to 400 Bad Request, and other unexpected Prisma errors to 500 Internal Server Error. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost` in `main.ts`.
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt. Auth rate limiting validated via supertest integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
-- **Comprehensive Test Suite** — 232 unit + integration tests across all 5 microservices (37 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
+- **Comprehensive Test Suite** — 235 unit + integration tests across all 5 microservices (42 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
 - **Playwright E2E Tests** — browser-based end-to-end tests for auth flow, wallet management, alert rules CRUD, wallet dashboard (balances, transactions), and WebSocket connectivity using MSW (Mock Service Worker) for API mocking — no backend needed in CI.
 
 ## Development
@@ -135,12 +135,12 @@ npm run build        # outputs to apps/frontend/dist/
 
 ## Testing
 
-Argus Monitor has a comprehensive test suite with **232 tests across 37 suites** covering all 5 microservices, plus Playwright E2E tests for the frontend.
+Argus Monitor has a comprehensive test suite with **235 tests across 42 suites** covering all 5 microservices, plus Playwright E2E tests for the frontend.
 
 ### Running Backend Tests
 
 ```bash
-npm test              # run all unit tests (232 tests, 37 suites)
+npm test              # run all unit tests (235 tests, 42 suites)
 npm run test:cov      # run with coverage (70% threshold enforced)
 npm run test:e2e      # run E2E integration tests (requires PostgreSQL)
 ```
@@ -172,7 +172,7 @@ The E2E tests use MSW (Mock Service Worker) to mock all API responses — no bac
 | Service | Test Files | What's Tested |
 |---------|-----------|---------------|
 | **api-service** | 15 test files | AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints |
-| **solana-adapter-service** | 5 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config |
+| **solana-adapter-service** | 6 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events) |
 | **alert-service** | 3 test files | AlertEngineService (all rule types: balance_low, balance_high, transaction_from, transaction_to, token_volume) |
 | **notification-service** | 5 test files | TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling) |
 | **chain-indexer-service** | 3 test files | AppController, AppService, HealthController |

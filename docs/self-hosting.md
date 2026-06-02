@@ -149,7 +149,7 @@ Two GitHub Actions workflows run on every PR:
 |---------|-----------|----------------|
 | api-service | ~120 | Auth, wallets, alert-rules, chains controllers/services; E2E supertest suite |
 | alert-service | ~30 | Alert engine (all rule types), app controller/service |
-| solana-adapter-service | ~30 | Solana adapter (mocked Helius), consumer, config |
+| solana-adapter-service | ~55 | Solana adapter (mocked Helius), consumer, config, RPC monitor (health checks, snapshots, status change events) |
 | notification-service | ~30 | Telegram service (send, format, error handling), NotificationConsumer (dispatch, retry, error handling) |
 | chain-indexer-service | ~15 | App controller, service, health check |
 | **frontend (E2E)** | **4 spec files** | Auth flow, wallet management, alert rules CRUD, WebSocket connectivity |
@@ -209,6 +209,7 @@ TELEGRAM_CHAT_ID=<your-telegram-chat-id>
 
 # Frontend
 VITE_API_URL=http://localhost:3000
+VITE_WS_URL=http://localhost:3000
 ```
 
 ### Reverse Proxy Configuration (nginx)

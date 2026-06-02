@@ -38,7 +38,8 @@ apps/
     src/rate-limiter/       Token bucket rate limiter
     src/circuit-breaker/    Three-state circuit breaker
     src/consumer/           BullMQ solana:fetch consumer
-    src/config/             Helius, Redis, rate limiter, circuit breaker config
+    src/config/             Helius, Redis, rate limiter, circuit breaker, RPC monitor config
+    src/rpc-monitor/        Periodic RPC health checks (latency, block height, status change events)
   alert-service/            Alert rule evaluation engine
   notification-service/     Telegram bot notifications
 packages/
@@ -58,7 +59,7 @@ Makefile                    Dev commands (up, down, migrate, seed, test, check, 
 
 ### Running Backend Tests
 ```bash
-npm test              # all unit tests (232 tests, 37 suites)
+npm test              # all unit tests (235 tests, 42 suites)
 npm run test:cov      # with coverage (70% threshold)
 npm run test:e2e      # E2E tests (requires PostgreSQL)
 make test             # via Docker
@@ -80,7 +81,7 @@ VITE_E2E_TEST=true npx playwright test
 
 ### Test Coverage by Service
 - **api-service** (15 files): AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints
-- **solana-adapter-service** (5 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config
+- **solana-adapter-service** (6 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events)
 - **alert-service** (3 files): AlertEngineService (all rule types)
 - **notification-service** (5 files): TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling)
 - **chain-indexer-service** (3 files): AppController, AppService, HealthController
