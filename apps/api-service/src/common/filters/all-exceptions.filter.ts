@@ -1,93 +1,87 @@
 import {
-  ExceptionFilter,
   Catch,
   ArgumentsHost,
   HttpException,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { BaseExceptionFilter, HttpAdapterHost } from '@nestjs/core';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
-import { redact } from '../logger/redact';
-
-interface ErrorResponse {
-  statusCode: number;
-  message: string;
-  stack?: string;
-}
 
 @Catch()
-export class AllExceptionsFilter implements ExceptionFilter {
+export class AllExceptionsFilter extends BaseExceptionFilter {
+  constructor(adapterHost: HttpAdapterHost) {
+    super(adapterHost.httpAdapter);
+  }
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const response = ctx.getResponse();
+    const request = ctx.getRequest();
+
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let message = 'Internal server error';
+
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      const exceptionResponse = exception.getResponse();
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null &&
+        'message' in exceptionResponse
+      ) {
+        message = (exceptionResponse as any).message;
+      }
+    } else if (exception instanceof PrismaClientKnownRequestError) {
+      switch (exception.code) {
+        case 'P2002':
+          status = HttpStatus.CONFLICT;
+          message = 'Resource already exists.';
+          break;
+        case 'P2025':
+          status = HttpStatus.NOT_FOUND;
+          message = 'Resource not found.';
+          break;
+        case 'P2003':
+          status = HttpStatus.BAD_REQUEST;
+          message = 'Invalid foreign key.';
+          break;
+        default:
+          this.logger.error(
+            `Unhandled Prisma error [${exception.code}]: ${exception.message}`,
+            exception.stack,
+          );
+          break;
+      }
+    } else if (exception instanceof Error) {
+      message = exception.message;
+    }
+
+    this.logger.error(
+      `HTTP Status: ${status} - Path: ${request.url}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
 
     const isProduction = process.env.NODE_ENV === 'production';
 
-    // Determine status code and message
-    let statusCode: number;
-    let message: string;
-
-    if (exception instanceof HttpException) {
-      statusCode = exception.getStatus();
-      const exceptionResponse = exception.getResponse();
-      message =
-        typeof exceptionResponse === 'string'
-          ? exceptionResponse
-          : (exceptionResponse as any).message || exception.message;
-    } else if (exception instanceof PrismaClientKnownRequestError) {
-      // Map Prisma errors to HTTP status codes
-      switch (exception.code) {
-        case 'P2002':
-          statusCode = HttpStatus.CONFLICT;
-          message = 'Resource already exists';
-          break;
-        case 'P2025':
-          statusCode = HttpStatus.NOT_FOUND;
-          message = 'Resource not found';
-          break;
-        default:
-          statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
-          message = 'Internal server error';
-          break;
-      }
+    if (isProduction) {
+      response.status(status).json({
+        statusCode: status,
+        message: status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Internal server error'
+          : message,
+      });
     } else {
-      statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
-      message = 'Internal server error';
+      response.status(status).json({
+        statusCode: status,
+        message,
+        timestamp: new Date().toISOString(),
+        path: request.url,
+        stack: exception instanceof Error ? exception.stack : undefined,
+      });
     }
-
-    // Log 5xx errors with context — redact sensitive data from request
-    if (statusCode >= 500) {
-      const requestId = (request as any).requestId || 'unknown';
-      const userId = (request as any).user?.id || 'anonymous';
-      const stack = exception instanceof Error ? exception.stack : undefined;
-
-      // Redact the request body and query params to prevent secret exposure
-      const redactedBody = request.body ? redact(request.body) : undefined;
-      const redactedQuery = request.query ? redact(request.query) : undefined;
-
-      this.logger.error(
-        `[${requestId}] [user:${userId}] ${request.method} ${request.url} - ${statusCode}: ${message}` +
-          (redactedBody ? ` body=${JSON.stringify(redactedBody)}` : '') +
-          (redactedQuery ? ` query=${JSON.stringify(redactedQuery)}` : ''),
-        stack,
-      );
-    }
-
-    // Build response body
-    const errorResponse: ErrorResponse = {
-      statusCode,
-      message: Array.isArray(message) ? message[0] : message,
-    };
-
-    // Include stack trace in non-production environments
-    if (!isProduction && exception instanceof Error) {
-      errorResponse.stack = exception.stack;
-    }
-
-    response.status(statusCode).json(errorResponse);
   }
 }

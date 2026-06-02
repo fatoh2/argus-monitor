@@ -11,7 +11,8 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 - **Queue**: Redis + BullMQ
 - **Real-time**: NestJS WebSocket Gateway + Socket.io
 - **Chain**: Solana via Helius API + @solana/web3.js
-- **Testing**: Jest + Testcontainers (backend), Playwright (E2E)
+- **Testing**: Jest + ts-jest + supertest (backend), Playwright (E2E)
+- **CI**: GitHub Actions (test.yml — PostgreSQL + Redis services on every PR)
 - **Local dev**: docker-compose.yml, Makefile (see `make help`)
 
 ## Repo Structure
@@ -22,6 +23,7 @@ apps/
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
     src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests (rate limiting via supertest)
+    test/app.e2e-spec.ts    E2E integration tests (supertest) for all REST endpoints
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
     src/adapter/            SolanaAdapter (ChainAdapter impl)
@@ -35,9 +37,39 @@ packages/
   chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
   shared-types/             Enums, queue names, job payload types, ChainAdapter interface
 k8s/apps/                   Helm charts for all services
+.github/workflows/
+  test.yml                  CI pipeline — runs on every PR (PostgreSQL + Redis services)
+jest.config.js              Root Jest config with project references for all 5 apps
 docker-compose.yml          Local dev — all services + PostgreSQL + Redis (env_file pattern)
 docker-compose.prod.yml     Self-hosted production
+Makefile                    Dev commands (up, down, migrate, seed, test, check, reset)
 ```
+
+## Testing
+
+### Running Tests
+```bash
+npm test              # all unit tests (228 tests, 36 suites)
+npm run test:cov      # with coverage (70% threshold)
+npm run test:e2e      # E2E tests (requires PostgreSQL)
+make test             # via Docker
+```
+
+### Test Coverage by Service
+- **api-service** (15 files): AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints
+- **solana-adapter-service** (5 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config
+- **alert-service** (3 files): AlertEngineService (all rule types)
+- **notification-service** (4 files): TelegramService (send, format, error handling)
+- **chain-indexer-service** (3 files): AppController, AppService, HealthController
+
+### CI Pipeline
+The `.github/workflows/test.yml` workflow runs on every PR to `develop` or `main`:
+1. Spins up PostgreSQL 16 + Redis 7 service containers
+2. Installs deps, generates Prisma client, runs migrations
+3. TypeScript check (`tsc --noEmit`)
+4. Lint check
+5. Tests with coverage (70% threshold)
+6. Uploads coverage artifacts
 
 ## API Service Details
 
@@ -116,142 +148,22 @@ All repository methods wrap Prisma calls with `try/catch` using the shared `hand
 | `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
 | `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
 | `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` (logged with full context) |
-
-
-**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"`
 
 ### Rate Limiting
-- Global: 100 requests per 60 seconds per IP (NestJS `@nestjs/throttler`)
-- Auth endpoints: 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
-- Health endpoint: exempt from rate limiting (`@SkipThrottle()`)
-- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
+Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
+
+| Scope | Limit | TTL | Exemptions |
+|-------|-------|-----|------------|
+| Global (all endpoints) | 100 requests | 60 seconds | — |
+| Auth endpoints | 10 requests | 60 seconds | — |
+| Health endpoint | Unlimited | — | Exempt via `@SkipThrottle()` |
+
+Rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 
 ### Secret Redaction
-All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
-
-## Solana Adapter Service Details
-
-The `solana-adapter-service` (port 3002) connects to the Solana blockchain via Helius RPC.
-
-### SolanaAdapter
-Implements `ChainAdapter` from `@argus/shared-types`. Uses `@solana/web3.js` Connection class.
-
-### Rate Limiter
-Token bucket algorithm. Configurable via `config/configuration.ts`:
-- `tokensPerInterval`: number of requests allowed per interval
-- `interval`: time window in milliseconds
-- `maxTokens`: maximum burst capacity
-
-### Circuit Breaker
-Three-state circuit breaker (CLOSED / OPEN / HALF_OPEN):
-- **CLOSED**: normal operation, requests pass through
-- **OPEN**: failures exceed threshold, requests are rejected immediately
-- **HALF_OPEN**: after cooldown, a single test request is allowed
-- Failure threshold and cooldown period are configurable
-
-### Consumer
-BullMQ consumer for the `solana:fetch` queue. Processes wallet fetch jobs by calling `SolanaAdapter` methods.
-
-## Testing
-- Backend: Jest with `--passWithNoTests` flag
-- E2E: supertest for HTTP endpoint testing
-- Run tests: `npm test` (root) or `npx jest` (per service)
-- Coverage: `npm run test:cov`
-
-## Docker
-- Local dev: `docker compose up -d` (uses docker-compose.yml)
-- Production: `docker compose -f docker-compose.prod.yml up -d`
-- Build: `docker compose build`
-
-## Critical Data Rules
-- **NEVER** store on-chain amounts as `float` or `decimal` — always `BIGINT`
-  - Solana: lamports (1 SOL = 1_000_000_000 lamports)
-  - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
-  - Store `asset_decimals` separately for display
-- **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
-- **Seed data** (`apps/api-service/prisma/seed.ts`) creates test user `test@argusmonitor.io` / `testpassword123`, 3 Solana devnet wallets, and 2 alert rules. Run with `cd apps/api-service && npx prisma db seed`. Clears existing data first — safe for local dev only.
-- **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
-- **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
-  - Index: `(wallet_id, captured_at DESC)` for chart queries
-
-## Service Communication Rules
-- Services communicate via **BullMQ queues only** — no direct HTTP between services
-- Queue names are defined in `packages/shared-types/src/queues/index.ts` — never hardcode
-- The chain-indexer pushes jobs → solana-adapter consumes them
-- solana-adapter writes to DB → alert-service reads via BullMQ or Postgres LISTEN
-
-## Non-Negotiable Rules
-- **NEVER** push directly to `main` or `develop` — always open a PR
-- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) scans all source files for log calls referencing secret env vars and enforces this policy.
-- **NEVER** commit `.env` files or API keys
-- **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
-- **NEVER** make direct HTTP calls between services — always BullMQ
-- **NEVER** use `any` type in TypeScript
-- **ALWAYS** write unit tests for: adapter methods, alert rule logic, data normalization
-- **ALWAYS** add `/metrics` Prometheus endpoint to every new NestJS service
-- **ALWAYS** run `npx prisma validate` before committing schema changes
-- **ALWAYS** run `npm test` before opening a PR
-- **ALWAYS** run `npm run build` — no TypeScript compilation errors allowed
-
-## Auth (MVP)
-Auth is inside `api-service` using NestJS Guards + JWT + Passport.
-- JWT strategy: `passport-jwt` with Bearer token extraction (access token)
-- Refresh token: httpOnly cookie (`refresh_token`) with `jti` for revocation
-- Global `JwtAuthGuard` applied per-controller
-- Passwords: bcrypt with 12 salt rounds
-- Access token: 15 minutes (hardcoded `15m`)
-- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation
-- Revoked tokens stored in `RevokedToken` table (by `jti`)
-- Cookie parser middleware registered in `main.ts`
-- Do NOT create a separate auth-service until explicitly instructed.
-
-## PR Format
-```
-Title: [monitor] short description  OR  [frontend] short description
-Body: What changed, why, how to test, risks, checklist
-Branch: feature/issue-{number}-{short-description}
-Base: develop (never main)
-```
+All log calls use NestJS `Logger` (not `console.log`). The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
 
 ## Environment Variables
 
-All env vars are documented in `.env.example` at the repo root. Key vars:
-
-| Variable | Service | Required | Default |
-|----------|---------|----------|---------|
-| `HELIUS_API_KEY` | solana-adapter | Yes | — |
-| `HELIUS_RPC_URL` | solana-adapter | No | `https://mainnet.helius-rpc.com/?api-key=` |
-| `RATE_LIMITER_MAX_RPS` | solana-adapter | No | 10 |
-| `RATE_LIMITER_MAX_RETRIES` | solana-adapter | No | 3 |
-| `RATE_LIMITER_BASE_DELAY_MS` | solana-adapter | No | 1000 |
-| `RATE_LIMITER_MAX_DELAY_MS` | solana-adapter | No | 30000 |
-| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | solana-adapter | No | 5 |
-| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | solana-adapter | No | 3 |
-| `CIRCUIT_BREAKER_TIMEOUT_MS` | solana-adapter | No | 30000 |
-| `JWT_SECRET` | api-service | Yes | — |
-| `DATABASE_URL` | api-service | Yes | — |
-| `REDIS_HOST` | all | No | localhost |
-| `REDIS_PORT` | all | No | 6379 |
-| `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
-| `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
-
-## Database Seeding
-
-A seed script at `apps/api-service/prisma/seed.ts` populates the database with test data for local development:
-
-- **Test user:** `test@argusmonitor.io` / `testpassword123` (bcrypt-hashed, JWT-compatible)
-- **Test wallets:** 3 Solana devnet addresses (no real funds)
-- **Alert rules:** `large_tx` (threshold: 1 SOL / 1_000_000_000 lamports) and `balance_change` (any change)
-- **Chain entry:** Solana devnet (`https://api.devnet.solana.com`)
-
-The seed is wired into `apps/api-service/package.json` via `"prisma": { "seed": "ts-node prisma/seed.ts" }`.
-
-**Usage:**
-```bash
-cd apps/api-service
-npx prisma db seed
-```
-
-The seed clears all existing data before inserting (safe for local dev only).
-
+See [docs/self-hosting.md](docs/self-hosting.md) for the full reference of all environment variables.

@@ -21,7 +21,7 @@ See the [README](../README.md#development) for the full command reference.
 
 ## Architecture Overview
 
-Argus Monitor consists of five NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.
+Argus Monitor consists of six NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────────┐
@@ -45,6 +45,11 @@ Argus Monitor consists of five NestJS microservices, a PostgreSQL database, and 
                                     │ Service          │
                                     │ (port 3004)      │
                                     └──────────────────┘
+
+┌──────────────────┐
+│ RPC Monitor      │
+│ (port 3005)      │
+└──────────────────┘
 ```
 
 ## Prerequisites
@@ -66,6 +71,46 @@ Argus Monitor consists of five NestJS microservices, a PostgreSQL database, and 
 - **Global exception filter + Prisma error handling**: In production, the API service returns only `{statusCode, message}` — no stack traces, timestamp, or path. In development, responses include `timestamp`, `path`, and `stack` for debugging. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost`. All errors are logged server-side with HTTP status and request URL. Prisma errors are mapped to proper HTTP codes (P2002 → 409 Conflict, P2025 → 404 Not Found, P2003 → 400 Bad Request, others → 500) both at the global filter level and per-method via the shared `handlePrismaError()` utility (`apps/api-service/src/common/prisma-error.handler.ts`).
 - **Rate limiting**: All API endpoints are rate-limited to prevent abuse. Auth endpoints have a stricter limit (10 req/60s) to mitigate brute-force attacks. The health endpoint is exempt to allow monitoring tools uninterrupted access. Auth rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 - **JWT token security**: Access tokens are short-lived (15 minutes). Refresh tokens are stored as httpOnly cookies with `sameSite: 'strict'` for CSRF protection. Refresh tokens can be revoked server-side via the `/logout` endpoint.
+
+## Testing
+
+Argus Monitor includes a comprehensive test suite with **228 unit and integration tests** across all 5 microservices.
+
+### Running Tests Locally
+
+```bash
+# Run all unit tests
+npm test
+
+# Run with coverage (70% threshold)
+npm run test:cov
+
+# Run E2E integration tests (requires PostgreSQL running)
+npm run test:e2e
+```
+
+### CI Pipeline
+
+Every pull request runs tests via GitHub Actions (`.github/workflows/test.yml`). The CI pipeline:
+
+1. Spins up PostgreSQL 16 and Redis 7 service containers
+2. Installs dependencies with `npm ci`
+3. Generates Prisma client and runs migrations
+4. Runs TypeScript type-check and lint
+5. Executes all tests with coverage reporting
+6. Uploads coverage reports as build artifacts
+
+### Test Coverage by Service
+
+| Service | Test Count | Key Test Files |
+|---------|-----------|----------------|
+| api-service | ~120 | Auth, wallets, alert-rules, chains controllers/services; E2E supertest suite |
+| alert-service | ~30 | Alert engine (all rule types), app controller/service |
+| solana-adapter-service | ~30 | Solana adapter (mocked Helius), consumer, config |
+| notification-service | ~25 | Telegram service (send, format, error handling) |
+| chain-indexer-service | ~15 | App controller/service, health controller |
+
+See the [README](../README.md#testing) for the full test structure reference.
 
 ## Setup Steps
 
@@ -130,6 +175,9 @@ ALERT_SERVICE_PORT=3003
 # ---- Notification Service (port 3004) ----
 NOTIFICATION_SERVICE_PORT=3004
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+
+# ---- RPC Monitor Service (port 3005) ----
+RPC_MONITOR_PORT=3005
 
 # ---- PostgreSQL ----
 DATABASE_URL=postgresql://argus:your-db-password@postgres:5432/argus

@@ -1,0 +1,252 @@
+# =============================================================================
+# Argus Monitor — Local Development Stack
+# =============================================================================
+# Usage:
+#   1. cp .env.example .env  (or use the defaults)
+#   2. docker compose up -d postgres redis
+#   3. docker compose run api-service npx prisma migrate deploy
+#   4. docker compose up -d
+#   5. curl http://localhost:3000/api/health
+# =============================================================================
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: argus-postgres
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-argus}
+      POSTGRES_USER: ${POSTGRES_USER:-argus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argus}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: argus-redis
+    env_file: .env
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── API Service (NestJS, port 3000) ─────────────────────────────────────────
+  api-service:
+    build:
+      context: .
+      dockerfile: apps/api-service/Dockerfile
+    container_name: argus-api-service
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${API_SERVICE_PORT:-3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
+    ports:
+      - "${API_SERVICE_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/api/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── Chain Indexer Service (NestJS, port 3001) ──────────────────────────────
+  chain-indexer:
+    build:
+      context: .
+      dockerfile: apps/chain-indexer-service/Dockerfile
+    container_name: argus-chain-indexer
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${CHAIN_INDEXER_PORT:-3001}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    ports:
+      - "${CHAIN_INDEXER_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3001/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── Solana Adapter Service (NestJS, port 3002) ─────────────────────────────
+  solana-adapter:
+    build:
+      context: .
+      dockerfile: apps/solana-adapter-service/Dockerfile
+    container_name: argus-solana-adapter
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${SOLANA_ADAPTER_PORT:-3002}
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+      HELIUS_RPC_URL: ${HELIUS_RPC_URL:-}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
+    ports:
+      - "${SOLANA_ADAPTER_PORT:-3002}:3002"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3002/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── Alert Service (NestJS, port 3003) ──────────────────────────────────────
+  alert-service:
+    build:
+      context: .
+      dockerfile: apps/alert-service/Dockerfile
+    container_name: argus-alert-service
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${ALERT_SERVICE_PORT:-3003}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    ports:
+      - "${ALERT_SERVICE_PORT:-3003}:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3003/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+  # ── Notification Service (NestJS, port 3004) ───────────────────────────────
+  notification:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    container_name: argus-notification
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${NOTIFICATION_SERVICE_PORT:-3004}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-3004}:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3004/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - argus-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  argus-net:
+    driver: bridge

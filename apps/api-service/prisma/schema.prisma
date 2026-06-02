@@ -1,0 +1,68 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  wallets      Wallet[]
+  alertRules   AlertRule[]
+}
+
+model Wallet {
+  id         String      @id @default(uuid())
+  address    String      @unique
+  userId     String
+  chain      String      // "SOLANA" or "ETHEREUM"
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alertRules AlertRule[]
+
+  @@index([userId])
+}
+
+model AlertRule {
+  id        String   @id @default(uuid())
+  userId    String
+  walletId  String
+  chain     String   // "SOLANA" or "ETHEREUM"
+  type      String   // e.g., "balance_low", "transaction_from"
+  threshold String?  // e.g., "1000000000" for lamports
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([walletId])
+}
+
+model Chain {
+  id        String   @id @default(uuid())
+  name      String   @unique // e.g., "Solana", "Ethereum"
+  rpcUrl    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RevokedToken {
+  id        String   @id @default(uuid())
+  tokenJti  String   @unique // JWT ID (jti) — unique per token
+  expiresAt DateTime // When the token naturally expires; we can clean up after this
+  createdAt DateTime @default(now())
+
+  @@index([tokenJti])
+  @@index([expiresAt])
+}

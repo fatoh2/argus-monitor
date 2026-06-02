@@ -16,7 +16,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt. Auth rate limiting validated via supertest integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
-
+- **Comprehensive Test Suite** — 228 unit + integration tests across all 5 microservices (36 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
 
 ## Development
 
@@ -55,6 +55,53 @@ make reset       # tears down volumes, recreates infra, migrates, seeds, starts 
 ```
 
 The `reset` target waits for PostgreSQL and Redis to become healthy before running migrations, ensuring a reliable one-command rebuild.
+
+## Testing
+
+Argus Monitor has a comprehensive test suite with **228 tests across 36 suites** covering all 5 microservices.
+
+### Running Tests
+
+```bash
+npm test              # run all unit tests (228 tests, 36 suites)
+npm run test:cov      # run with coverage (70% threshold enforced)
+npm run test:e2e      # run E2E integration tests (requires PostgreSQL)
+```
+
+Tests can also be run via Docker for consistency:
+
+```bash
+make test             # runs `npm test` inside the api-service container
+```
+
+### Test Coverage by Service
+
+| Service | Test Files | What's Tested |
+|---------|-----------|---------------|
+| **api-service** | 15 test files | AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints |
+| **solana-adapter-service** | 5 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config |
+| **alert-service** | 3 test files | AlertEngineService (all rule types: balance_low, balance_high, transaction_from, transaction_to, token_volume) |
+| **notification-service** | 4 test files | TelegramService (send, format, error handling) |
+| **chain-indexer-service** | 3 test files | AppController, AppService, HealthController |
+
+### CI Pipeline
+
+A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every PR to `develop` or `main`:
+
+1. Spins up PostgreSQL 16 and Redis 7 as service containers
+2. Installs dependencies (`npm ci`)
+3. Generates Prisma client and runs migrations
+4. Runs TypeScript check (`tsc --noEmit`)
+5. Runs lint check
+6. Runs all tests with coverage (70% threshold)
+7. Uploads coverage reports as artifacts
+
+### Test Infrastructure
+
+- **Root `jest.config.js`** — project references for all 5 apps with 70% global coverage threshold
+- **Per-app `jest.config.js`** — each app has its own config with coverage exclusions (main.ts, module files, spec files)
+- **`tsconfig.json`** — added for apps that were missing it
+- **`test/jest-e2e-config.json`** — E2E test configuration for api-service (supertest)
 
 ## Architecture
 
@@ -100,223 +147,139 @@ All blockchain adapters implement the `ChainAdapter` interface from `@argus/shar
 
 **Data types:**
 - `NativeBalance` — `{address, balance: bigint, decimals, symbol}`
-- `TokenBalance` — `{mint, symbol, name, amount: bigint, decimals, usdValue}`
-- `Transaction` — `{signature, slot, timestamp, from, to, amount: bigint, fee: bigint, status, type}`
-- `RpcHealthResult` — `{endpoint, healthy, latencyMs, blockHeight, error?}`
+- `TokenBalance` — `{address, mint, amount: bigint, decimals, symbol, name}`
+- `Transaction` — `{hash, from, to, value: bigint, timestamp, status, fee, tokenTransfers?}`
+- `RpcHealthResult` — `{isHealthy, latencyMs, currentBlock?, error?}`
 
-**Critical rule:** All on-chain amounts are stored as `BIGINT` (lamports for Solana, wei for EVM). Never use float or decimal.
+## Repo Structure
 
-### Database (PostgreSQL via Prisma)
-
-- **User** — email + bcrypt-hashed password
-- **Wallet** — blockchain address + chain type, owned by user
-- **AlertRule** — rule configuration per wallet (type, threshold, chain)
-- **Chain** — supported blockchain networks (name, RPC URL)
-- **RevokedToken** — tracks revoked refresh tokens by JWT ID (`jti`) for secure logout
-
-## JWT Authentication
-
-The API service uses a dual-token JWT authentication system:
-
-- **Access Token** — short-lived (15 minutes), sent via `Authorization: Bearer` header. Used for authenticating API requests.
-- **Refresh Token** — long-lived (7 days), stored as an httpOnly cookie (`refresh_token`). Used to obtain new access tokens without re-authentication.
-
-### Cookie Configuration
-
-| Attribute | Value | Purpose |
-|-----------|-------|---------|
-| `httpOnly` | `true` | Not accessible via JavaScript (XSS protection) |
-| `secure` | `true` in production | HTTPS only |
-| `sameSite` | `strict` | CSRF protection |
-| `path` | `/api/auth` | Scoped to auth endpoints |
-| `maxAge` | 7 days | Matches refresh token TTL |
-
-### Auth Endpoints
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/auth/register` | Public | Register with email + password. Returns `{accessToken, user}`, sets refresh cookie |
-| `POST` | `/api/auth/login` | Public | Login. Returns `{accessToken, user}`, sets refresh cookie |
-| `POST` | `/api/auth/refresh` | Cookie | Reads refresh token from cookie, returns new `{accessToken, user}`, rotates refresh cookie |
-| `POST` | `/api/auth/logout` | Cookie | Revokes refresh token server-side, clears cookie |
-| `POST` | `/api/auth/me` | Bearer JWT | Returns current user profile |
-
-### Refresh Token Revocation
-
-When a user logs out, the refresh token's JWT ID (`jti`) is stored in the `RevokedToken` table. Any subsequent attempt to use a revoked refresh token is rejected with `401 Unauthorized`. This ensures that even if a refresh token is compromised, it can be invalidated server-side.
-
-## Rate Limiting
-
-The API service uses `@nestjs/throttler` v6.5.0 to protect all public endpoints from abuse:
-
-| Endpoint Group | Limit | Scope |
-|----------------|-------|-------|
-| All endpoints (default) | 100 requests per 60 seconds per IP | Global |
-| Auth (`/api/auth/login`, `/register`, `/refresh`) | 10 requests per 60 seconds per IP | Per-endpoint override via `@Throttle()` |
-| Health (`GET /api/health`) | Unlimited | Exempt via `@SkipThrottle()` |
-
-When the limit is exceeded, the API returns **HTTP 429 Too Many Requests** with a `Retry-After` header indicating when the client can retry.
-
-**Note:** The throttler uses in-memory storage by default. If you scale to multiple API service instances, configure a Redis store for shared rate limit tracking.
-
-## Prisma Error Handling
-
-All repository methods in the API service wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`:
-
-| Prisma Error Code | Meaning | HTTP Status | Response Message |
-|---|---|---|---|
-| `P2002` | Unique constraint violation | `409 Conflict` | `"Resource already exists."` |
-| `P2025` | Record not found | `404 Not Found` | `"Resource not found."` |
-| `P2003` | Foreign key constraint violation | `400 Bad Request` | `"Invalid foreign key."` |
-| Other | Unexpected Prisma error | `500 Internal Server Error` | `"Internal server error"` (logged server-side with full context) |
-
-**Services using `handlePrismaError()`:**
-- `WalletsService` — all CRUD methods (`create`, `findAllByUser`, `findOne`, `remove`)
-- `ChainsService` — all CRUD methods (`create`, `findAll`, `findOne`, `remove`)
-- `AuthService` — `register`, `login`, `refreshToken`
-- `AlertRulesService` — all CRUD methods (`create`, `findAllByUser`, `findOne`, `remove`)
-
-Non-Prisma errors (e.g., `NotFoundException`, `ConflictException` thrown explicitly by service logic) are re-thrown as-is and handled by the global `AllExceptionsFilter`.
-
-**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
-
-## Secret Redaction
-
-Argus Monitor enforces a strict **no secrets in logs** policy across all services:
-
-- **`redact()` utility** (`apps/api-service/src/common/logger/redact.ts`) — recursively masks sensitive fields from objects before logging. Detects and redacts:
-  - Authentication secrets: passwords, tokens, JWT, API keys, private keys
-  - PII: email, phone, SSN, credit card numbers
-  - Blockchain secrets: mnemonics, seed phrases, wallet private keys
-  - Case-insensitive field matching (e.g., `apiKey`, `API_KEY`, `apikey` all match)
-- **`redactUrl(url)`** — strips API keys and tokens from URL query parameters
-- **`safeStringify(obj)`** — JSON.stringify with automatic redaction
-- **`containsEnvSecretRef(str)`** — detects `process.env.*KEY*` references in strings
-
-### Where Redaction Is Applied
-
-| Location | What's Redacted |
-|----------|----------------|
-| `AllExceptionsFilter` (5xx error logs) | Request body and query params before logging |
-| `SolanaConsumer` (wallet address logs) | Wallet addresses (first 4 + last 4 chars preserved) |
-| All `main.ts` bootstrap logs | Replaced `console.log` with NestJS `Logger` (structured, level-aware) |
-
-### Enforcement
-
-A lint-style test (`apps/api-service/src/common/__tests__/log-secrets-lint.spec.ts`) scans all `.ts` and `.tsx` source files for log calls referencing secret environment variables (matching patterns: KEY, SECRET, TOKEN, PASSWORD, PRIVATE, MNEMONIC, SEED). If a violation is found, the test fails with the file path and line number.
-
-**Source:** `apps/api-service/src/common/logger/redact.ts`
-
-
-## Solana Adapter Service
-
-The `solana-adapter-service` (port 3002) provides Helius RPC integration for Solana blockchain monitoring.
-
-### SolanaAdapter
-
-Implements the `ChainAdapter` interface for Solana:
-
-- `getNativeBalance(address)` — returns SOL balance in lamports (BIGINT)
-- `getTokenBalances(address)` — returns SPL token balances, skips zero-balance tokens
-- `getRecentTransactions(address, limit=20)` — returns last N transactions normalized to `Transaction` interface
-- `checkRpcHealth(endpoint)` — latency + block height health check
-- Transaction normalization: parses system program transfers (SOL) and token program transfers (SPL)
-
-### Rate Limiter
-
-Token bucket algorithm protecting Helius RPC from excessive requests:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Max RPS | `RATE_LIMITER_MAX_RPS` | 10 | Max requests per second |
-| Max retries | `RATE_LIMITER_MAX_RETRIES` | 3 | Retry attempts on rate limit |
-| Base delay | `RATE_LIMITER_BASE_DELAY_MS` | 1000 | Initial backoff delay (ms) |
-| Max delay | `RATE_LIMITER_MAX_DELAY_MS` | 30000 | Maximum backoff delay (ms) |
-
-### Circuit Breaker
-
-Three-state circuit breaker (`CLOSED → OPEN → HALF_OPEN`) that prevents cascading failures when Helius RPC is degraded:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open |
-| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Consecutive successes to close |
-| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Wait before half-open (ms) |
-| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts when circuit is closed |
-| Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
-| Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
-
-### Caching
-
-In-memory cache with TTL to reduce redundant RPC calls:
-
-| Config | Env Var | Default | Description |
-|--------|---------|---------|-------------|
-| Cache TTL | `CACHE_TTL_MS` | 30000 | Cache duration (ms) |
-| Max entries | `CACHE_MAX_ENTRIES` | 1000 | Max cached items |
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 20+
-- Docker & Docker Compose
-- A Helius API key (free tier)
-
-### Local Development
-
-The fastest way to get started is using the `Makefile`:
-
-```bash
-# Clone the repo
-git clone https://github.com/fatoh2/argus-monitor.git
-cd argus-monitor
-
-# Copy environment file
-cp .env.example .env
-# Edit .env with your Helius API key and JWT secret
-
-# Start all services, run migrations, and seed the database
-make up
-make migrate
-make seed
-
-# Verify health
-curl http://localhost:3000/api/health
+```
+argus-monitor/
+├── apps/
+│   ├── api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
+│   │   ├── src/
+│   │   │   ├── auth/             JWT auth (register, login, refresh, logout)
+│   │   │   ├── wallets/          Wallet CRUD
+│   │   │   ├── alert-rules/      Alert rule CRUD
+│   │   │   ├── chains/           Chain management (admin)
+│   │   │   ├── websockets/       WebSocket gateway
+│   │   │   ├── prisma/           Prisma service
+│   │   │   ├── common/           Filters, pipes, error handlers, logger
+│   │   │   └── health/           Health check endpoint
+│   │   └── test/                 E2E integration tests (supertest)
+│   ├── chain-indexer-service/    BullMQ job scheduler
+│   ├── solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
+│   ├── alert-service/            Alert rule evaluation engine
+│   └── notification-service/     Telegram bot notifications
+├── packages/
+│   ├── chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
+│   └── shared-types/             Enums, queue names, job payload types, ChainAdapter interface
+├── k8s/apps/                     Helm charts for all services
+├── .github/workflows/            CI pipelines (test.yml runs on every PR)
+├── jest.config.js                Root Jest config with project references
+├── docker-compose.yml            Local dev — all services + PostgreSQL + Redis
+├── docker-compose.prod.yml       Self-hosted production
+├── Makefile                      Dev commands (up, down, migrate, test, etc.)
+└── package.json                  Workspace root with shared scripts
 ```
 
-Or step by step with Docker Compose directly:
+## API Service Details
 
-```bash
-# Start infrastructure (PostgreSQL, Redis)
-docker compose up -d postgres redis
+The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` prefix.
 
-# Run database migrations
-docker compose run api-service npx prisma migrate deploy
+### Auth (public, except /me)
+- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds). Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/login` — login. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/refresh` — reads refresh token from `refresh_token` httpOnly cookie, verifies it, returns new `{accessToken, user}`, rotates refresh cookie
+- `POST /api/auth/logout` — revokes refresh token server-side (stores `jti` in `RevokedToken` table), clears `refresh_token` cookie
+- `POST /api/auth/me` — get current user profile (JWT protected, `JwtAuthGuard`)
 
-# Seed the database with test data
-docker compose run api-service npx prisma db seed
+**Token TTLs:**
+- Access token: 15 minutes (hardcoded `15m`)
+- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation support
 
-# Start all services
-docker compose up -d
+**Cookie config for refresh_token:**
+- `httpOnly: true` — not accessible via JavaScript
+- `secure: true` in production (HTTPS only)
+- `sameSite: 'strict'` — CSRF protection
+- `path: '/api/auth'` — scoped to auth endpoints
+- `maxAge: 7 days`
 
-# Verify health
-curl http://localhost:3000/api/health
+### Wallets (JWT required, JwtAuthGuard)
+- `POST /api/wallets` — add wallet `{address, chain: "SOLANA"|"ETHEREUM"}`
+- `GET /api/wallets` — list user's wallets
+- `GET /api/wallets/:id` — get single wallet (UUID)
+- `DELETE /api/wallets/:id` — delete wallet
+
+### Alert Rules (JWT required, JwtAuthGuard)
+- `POST /api/alert-rules` — create rule `{walletId, chain, type, threshold?}`
+- `GET /api/alert-rules` — list user's rules
+- `GET /api/alert-rules/:id` — get single rule (UUID)
+- `DELETE /api/alert-rules/:id` — delete rule
+
+**Alert rule types:** `balance_low`, `balance_high`, `transaction_from`, `transaction_to`
+
+### Chains (admin — no auth guard yet)
+- `POST /api/chains` — create chain `{name, rpcUrl}`
+- `GET /api/chains` — list all chains
+- `GET /api/chains/:id` — get single chain (UUID)
+- `DELETE /api/chains/:id` — delete chain
+
+### Global Exception Filter
+The api-service registers a global `AllExceptionsFilter` in `main.ts` that catches all unhandled exceptions. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost`:
+
+```typescript
+// main.ts
+const { httpAdapter } = app.get(HttpAdapterHost);
+app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
 ```
 
-The seed is wired into `apps/api-service/package.json` via `"prisma": { "seed": "ts-node prisma/seed.ts" }`, so `npx prisma db seed` works automatically after `npm install`.
+**Exception handling:**
+- **HttpException** — passes through the original status code and message
+- **PrismaClientKnownRequestError** — mapped to HTTP status codes:
+  - `P2002` (unique constraint) → `409 Conflict` with message `"Resource already exists."`
+  - `P2025` (record not found) → `404 Not Found` with message `"Resource not found."`
+  - `P2003` (foreign key constraint) → `400 Bad Request` with message `"Invalid foreign key."`
+  - Other Prisma errors → `500 Internal Server Error` with message `"Internal server error"`
+- **All other exceptions** → `500 Internal Server Error` with message `"Internal server error"`
 
-The seed command creates test data for local development:
+**Production behavior** (`NODE_ENV=production`):
+- Response body: `{ statusCode, message }` only — NO stack trace, NO timestamp, NO path
+- Internal server errors always return generic `"Internal server error"` message
 
-| Item | Details |
-|------|---------|
-| **Test user** | `test@argusmonitor.io` / `testpassword123` |
-| **Test wallets** | 3 Solana devnet addresses (no real funds) |
-| **Alert rules** | `large_tx` (threshold: 1 SOL) on wallet 0, `balance_change` on wallet 1 |
-| **Chain entry** | Solana devnet (`https://api.devnet.solana.com`) |
+**Development behavior** (any other `NODE_ENV`):
+- Response body includes `timestamp`, `path`, and `stack` fields for debugging
 
-Login with `test@argusmonitor.io` / `testpassword123` to explore the API immediately.
+**Source:** `apps/api-service/src/common/filters/all-exceptions.filter.ts`
 
-**Source:** `apps/api-service/prisma/seed.ts`
+### Prisma Error Handling
+All repository methods wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`:
 
-See [docs/self-hosting.md](docs/self-hosting.md) for production deployment instructions.
+| Prisma Error | HTTP Status | Message |
+|---|---|---|
+| `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
+| `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
+| `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"`
+
+### Rate Limiting
+Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
+
+| Scope | Limit | TTL | Exemptions |
+|-------|-------|-----|------------|
+| Global (all endpoints) | 100 requests | 60 seconds | — |
+| Auth endpoints | 10 requests | 60 seconds | — |
+| Health endpoint | Unlimited | — | Exempt via `@SkipThrottle()` |
+
+Rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
+
+### Secret Redaction
+All log calls use NestJS `Logger` (not `console.log`). The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
+
+## Environment Variables
+
+See [docs/self-hosting.md](docs/self-hosting.md) for the full reference of all environment variables.
+
+## License
+
+MIT
