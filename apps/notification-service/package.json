@@ -15,7 +15,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brim --inspect-brim node_modules/jest/bin/jest --runInBand",
+    "test:debug": "node --inspect-brk node_modules/jest/bin/jest --runInBand",
     "lint": "nest lint"
   },
   "dependencies": {
@@ -53,19 +53,19 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
+    "rootDir": ".",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s",
-      "!**/*.spec.ts",
-      "!**/__tests__/**",
-      "!main.ts",
-      "!**/*.module.ts"
+      "src/**/*.(t|j)s",
+      "!src/**/*.spec.ts",
+      "!src/**/__tests__/**",
+      "!src/main.ts",
+      "!src/**/*.module.ts"
     ],
-    "coverageDirectory": "../coverage/apps/notification-service",
+    "coverageDirectory": "coverage",
     "coverageThreshold": {
       "global": {
         "branches": 70,
@@ -77,7 +77,7 @@
     "testEnvironment": "node",
     "displayName": "notification-service",
     "moduleNameMapper": {
-      "^@argus/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts"
+      "^@argus/shared-types$": "<rootDir>/../../packages/shared-types/src/index.ts"
     }
   }
 }
