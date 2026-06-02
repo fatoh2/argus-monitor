@@ -20,7 +20,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt. Auth rate limiting validated via supertest integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
-- **Comprehensive Test Suite** — 271 unit + integration tests across all 6 microservices (45 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
+- **Comprehensive Test Suite** — 273 unit + integration tests across all 6 microservices (53 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
 - **Playwright E2E Tests** — browser-based end-to-end tests for auth flow, wallet management, alert rules CRUD, wallet dashboard (balances, transactions), and WebSocket connectivity using MSW (Mock Service Worker) for API mocking — no backend needed in CI.
 
 ## Development
@@ -135,12 +135,12 @@ npm run build        # outputs to apps/frontend/dist/
 
 ## Testing
 
-Argus Monitor has a comprehensive test suite with **271 tests across 45 suites** covering all 6 microservices, plus Playwright E2E tests for the frontend.
+Argus Monitor has a comprehensive test suite with **273 tests across 53 suites** covering all 6 microservices, plus Playwright E2E tests for the frontend.
 
 ### Running Backend Tests
 
 ```bash
-npm test              # run all unit tests (271 tests, 45 suites)
+npm test              # run all unit tests (273 tests, 53 suites)
 npm run test:cov      # run with coverage (70% threshold enforced)
 npm run test:e2e      # run E2E integration tests (requires PostgreSQL)
 ```
@@ -171,12 +171,12 @@ The E2E tests use MSW (Mock Service Worker) to mock all API responses — no bac
 
 | Service | Test Files | What's Tested |
 |---------|-----------|---------------|
-| **api-service** | 15 test files | AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints |
-| **solana-adapter-service** | 9 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events), AppController, AppService, HealthController |
-| **alert-service** | 3 test files | AlertEngineService (all rule types: balance_low, balance_high, transaction_from, transaction_to, token_volume) |
-| **notification-service** | 5 test files | TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling) |
+| **api-service** | 25 test files | AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, AppModule, AuthController, WalletsController, AlertRulesController, E2E REST endpoints |
+| **solana-adapter-service** | 11 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events), AppModule, AppController, AppService, HealthController, BigInt arithmetic |
+| **alert-service** | 6 test files | AlertEngineService (all rule types: balance_low, balance_high, transaction_from, transaction_to, token_volume), AppModule, AppController, AppService |
+| **notification-service** | 6 test files | TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling), AppModule |
 | **adapter-sdk** | 2 test files | ChainAdapter interface contract tests, SolanaAdapter unit tests (14 tests) |
-| **chain-indexer-service** | 3 test files | AppController, AppService, HealthController |
+| **chain-indexer-service** | 5 test files | AppController, AppService, HealthController, AppModule, queue name validation |
 
 ### CI Pipelines
 
