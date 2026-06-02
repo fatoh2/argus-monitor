@@ -2,6 +2,23 @@
 
 This guide walks you through self-hosting Argus Monitor in production.
 
+## Local Development
+
+For local development, use the `Makefile` at the project root:
+
+```bash
+make up          # start all services
+make migrate     # run Prisma migrations
+make seed        # seed database with test data
+make check       # TypeScript type-check
+make test        # run all workspace tests
+make logs        # tail container logs
+make reset       # full reset: down -v, migrate, seed, start all
+make help        # show all available commands
+```
+
+See the [README](../README.md#development) for the full command reference.
+
 ## Architecture Overview
 
 Argus Monitor consists of five NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.

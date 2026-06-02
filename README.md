@@ -17,6 +17,45 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
 
+
+## Development
+
+Argus Monitor includes a `Makefile` with common development commands to streamline local workflows. All commands run via Docker Compose for consistency.
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `make help` | Show all targets with descriptions |
+| `make up` | Start all services in background (`docker compose up -d`) |
+| `make down` | Stop all services (`docker compose down`) |
+| `make migrate` | Run Prisma migrations (development — `migrate dev`) |
+| `make migrate-prod` | Run Prisma migrations (production-style — `migrate deploy`) |
+| `make seed` | Seed the database with test data |
+| `make check` | TypeScript type-check (api-service) |
+| `make test` | Run all workspace tests |
+| `make logs` | Tail all container logs |
+| `make psql` | Open psql shell in postgres (requires running containers) |
+| `make redis-cli` | Open redis-cli in redis (requires running containers) |
+| `make reset` | Full reset: down -v, start infra, migrate, seed, start all |
+
+### Quick Start
+
+```bash
+make up          # start all services
+make migrate     # run migrations
+make seed        # seed database
+make check       # verify TypeScript compiles
+```
+
+### Full Reset
+
+```bash
+make reset       # tears down volumes, recreates infra, migrates, seeds, starts all
+```
+
+The `reset` target waits for PostgreSQL and Redis to become healthy before running migrations, ensuring a reliable one-command rebuild.
+
 ## Architecture
 
 Argus Monitor is a **monorepo** with multiple NestJS microservices:
@@ -226,6 +265,8 @@ In-memory cache with TTL to reduce redundant RPC calls:
 
 ### Local Development
 
+The fastest way to get started is using the `Makefile`:
+
 ```bash
 # Clone the repo
 git clone https://github.com/fatoh2/argus-monitor.git
@@ -235,6 +276,18 @@ cd argus-monitor
 cp .env.example .env
 # Edit .env with your Helius API key and JWT secret
 
+# Start all services, run migrations, and seed the database
+make up
+make migrate
+make seed
+
+# Verify health
+curl http://localhost:3000/api/health
+```
+
+Or step by step with Docker Compose directly:
+
+```bash
 # Start infrastructure (PostgreSQL, Redis)
 docker compose up -d postgres redis
 
