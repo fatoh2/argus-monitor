@@ -5,6 +5,35 @@ import { QUEUES, QueueJobMap } from '@argus/shared-types';
 import { SolanaAdapter } from '../adapter/solana.adapter';
 
 /**
+ * Simple redact helper for consumer logs.
+ * Masks wallet addresses partially to preserve traceability without exposing full address.
+ */
+function redactAddress(address: string): string {
+  if (!address || address.length < 10) return address;
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+/**
+ * Redact sensitive fields from a loggable object.
+ */
+function redactLogData(data: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    const lowerKey = key.toLowerCase();
+    if (['password', 'token', 'secret', 'privatekey', 'private_key', 'apikey', 'api_key', 'mnemonic', 'seedphrase'].includes(lowerKey)) {
+      result[key] = '***REDACTED***';
+    } else if (lowerKey === 'address' && typeof value === 'string') {
+      result[key] = redactAddress(value);
+    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      result[key] = redactLogData(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * BullMQ consumer for solana:fetch queue.
  * Processes scan jobs from the chain-indexer service.
  */
@@ -26,7 +55,7 @@ export class SolanaConsumer extends WorkerHost {
     const { walletId, address, monitorType } = job.data;
 
     this.logger.log(
-      `Processing job ${job.id}: wallet=${walletId}, address=${address}, type=${monitorType}`,
+      `Processing job ${job.id}: wallet=${walletId}, address=${redactAddress(address)}, type=${monitorType}`,
     );
 
     try {
