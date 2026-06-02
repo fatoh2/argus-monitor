@@ -303,4 +303,159 @@ export const handlers = [
     store.alertRules.splice(idx, 1);
     return HttpResponse.json({ message: 'Alert rule deleted' });
   }),
-];
+
+  // Balances: Get all balances for user's wallets
+  http.get('/api/balances', async ({ request }) => {
+    await delay(50);
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+    const token = authHeader.slice(7);
+    const userId = extractUserId(token);
+    if (!userId) {
+      return HttpResponse.json({ message: 'Invalid token' }, { status: 401 });
+    }
+
+    const userWallets = store.wallets.filter((w) => w.userId === userId);
+    const balances = userWallets.map((w) => ({
+      walletId: w.id,
+      address: w.address,
+      chain: w.chain,
+      solBalance: '12500000000', // 12.5 SOL in lamports
+      tokens: [
+        { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', amount: '500000000', decimals: 6, usdValue: '500.00' },
+        { mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', symbol: 'mSOL', amount: '5000000000', decimals: 9, usdValue: '575.00' },
+      ],
+      updatedAt: new Date().toISOString(),
+    }));
+    return HttpResponse.json(balances);
+  }),
+
+  // Balances: Get balance for a specific wallet
+  http.get('/api/wallets/:id/balances', async ({ params, request }) => {
+    await delay(50);
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+    const token = authHeader.slice(7);
+    const userId = extractUserId(token);
+    if (!userId) {
+      return HttpResponse.json({ message: 'Invalid token' }, { status: 401 });
+    }
+
+    const wallet = store.wallets.find((w) => w.id === params.id && w.userId === userId);
+    if (!wallet) {
+      return HttpResponse.json({ message: 'Wallet not found' }, { status: 404 });
+    }
+
+    return HttpResponse.json({
+      walletId: wallet.id,
+      address: wallet.address,
+      chain: wallet.chain,
+      solBalance: '12500000000',
+      tokens: [
+        { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', amount: '500000000', decimals: 6, usdValue: '500.00' },
+        { mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', symbol: 'mSOL', amount: '5000000000', decimals: 9, usdValue: '575.00' },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
+  // Transactions: Get all transactions for user's wallets
+  http.get('/api/transactions', async ({ request }) => {
+    await delay(50);
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+    const token = authHeader.slice(7);
+    const userId = extractUserId(token);
+    if (!userId) {
+      return HttpResponse.json({ message: 'Invalid token' }, { status: 401 });
+    }
+
+    const userWallets = store.wallets.filter((w) => w.userId === userId);
+    const txs = userWallets.flatMap((w) => [
+      {
+        id: genId(),
+        walletId: w.id,
+        signature: '5VERv8NMHbh7qPvH6q3aXz1Q2sLJqY1GqKJcXzF1aB2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6',
+        type: 'receive' as const,
+        amount: '1000000000',
+        symbol: 'SOL',
+        fee: '5000',
+        timestamp: new Date(Date.now() - 3600000).toISOString(),
+        status: 'confirmed' as const,
+      },
+      {
+        id: genId(),
+        walletId: w.id,
+        signature: '4A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6A1b2C3d4E5f6G',
+        type: 'send' as const,
+        amount: '500000000',
+        symbol: 'SOL',
+        fee: '5000',
+        timestamp: new Date(Date.now() - 7200000).toISOString(),
+        status: 'confirmed' as const,
+      },
+      {
+        id: genId(),
+        walletId: w.id,
+        signature: '3X9y8Z7w6V5u4T3s2R1q0P9o8I7u6Y5t4R3e2W1q0P9o8I7u6Y5t4R3e2W1q0P9o8I7u',
+        type: 'swap' as const,
+        amount: '250000000',
+        symbol: 'USDC',
+        fee: '5000',
+        timestamp: new Date(Date.now() - 86400000).toISOString(),
+        status: 'confirmed' as const,
+      },
+    ]);
+    return HttpResponse.json(txs);
+  }),
+
+  // Transactions: Get transactions for a specific wallet
+  http.get('/api/wallets/:id/transactions', async ({ params, request }) => {
+    await delay(50);
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+    const token = authHeader.slice(7);
+    const userId = extractUserId(token);
+    if (!userId) {
+      return HttpResponse.json({ message: 'Invalid token' }, { status: 401 });
+    }
+
+    const wallet = store.wallets.find((w) => w.id === params.id && w.userId === userId);
+    if (!wallet) {
+      return HttpResponse.json({ message: 'Wallet not found' }, { status: 404 });
+    }
+
+    return HttpResponse.json([
+      {
+        id: genId(),
+        walletId: wallet.id,
+        signature: '5VERv8NMHbh7qPvH6q3aXz1Q2sLJqY1GqKJcXzF1aB2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6',
+        type: 'receive' as const,
+        amount: '1000000000',
+        symbol: 'SOL',
+        fee: '5000',
+        timestamp: new Date(Date.now() - 3600000).toISOString(),
+        status: 'confirmed' as const,
+      },
+      {
+        id: genId(),
+        walletId: wallet.id,
+        signature: '4A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6A1b2C3d4E5f6G',
+        type: 'send' as const,
+        amount: '500000000',
+        symbol: 'SOL',
+        fee: '5000',
+        timestamp: new Date(Date.now() - 7200000).toISOString(),
+        status: 'confirmed' as const,
+      },
+    ]);
+  }),
+]
