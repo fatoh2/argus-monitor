@@ -196,6 +196,7 @@ REDIS_URL=redis://redis:6379
 
 # JWT
 JWT_SECRET=<strong-random-secret>
+JWT_EXPIRATION_TIME=60s
 JWT_ACCESS_EXPIRATION=15m
 JWT_REFRESH_EXPIRATION=7d
 
@@ -206,6 +207,12 @@ HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<your-helius-api-key>
 # Telegram (notifications)
 TELEGRAM_BOT_TOKEN=<your-bot-token>
 TELEGRAM_CHAT_ID=<your-telegram-chat-id>
+
+# RPC Monitor (embedded in solana-adapter-service)
+RPC_MONITOR_PORT=3005
+RPC_MONITOR_POLL_INTERVAL_MS=30000
+RPC_MONITOR_MAX_SNAPSHOTS=10
+RPC_MONITOR_ENDPOINTS=
 
 # Frontend
 VITE_API_URL=http://localhost:3000
