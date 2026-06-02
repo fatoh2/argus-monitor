@@ -1,17 +1,21 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Security headers — sets CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.
+  app.use(helmet());
+
   // Global exception filter — prevents stack traces leaking in production
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // Enable CORS for frontend
+  // Enable CORS for frontend — locked down to allowed origins
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.ALLOWED_ORIGINS?.split(',') ?? [],
     credentials: true,
   });
 
