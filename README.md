@@ -4,7 +4,9 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 
 ## Features
 
-- **React Frontend** — Vite + React 18 + TypeScript + Tailwind CSS with auth pages (Login, Register), wallet dashboard, and alert rules management
+- **React Frontend** — Vite + React 18 + TypeScript + Tailwind CSS with auth pages (Login, Register), wallet dashboard with balances and transactions, and alert rules management
+- **Wallet Dashboard** — wallet list with add/remove, SOL balance displayed as ◎ with lamports formatted via BigInt (no float), SPL token balances (USDC, mSOL) with USD values, recent transactions table with type/amount/signature/status/time
+- **Socket.io Live Updates** — authenticated WebSocket connection handling `wallet_update`, `balance_update`, and `new_transaction` events with animated notification banner
 - **JWT Authentication** — register, login, refresh tokens, logout, profile endpoint. Short-lived access tokens (15 min) with httpOnly refresh token cookies (7 days) for secure session management.
 - **Wallet Management** — add, list, view, and delete blockchain wallet addresses
 - **Alert Rules** — create, list, view, and delete alert rules per wallet
@@ -19,7 +21,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
 - **Comprehensive Test Suite** — 232 unit + integration tests across all 5 microservices (37 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
-- **Playwright E2E Tests** — browser-based end-to-end tests for auth flow, wallet management, alert rules CRUD, and WebSocket connectivity using MSW (Mock Service Worker) for API mocking — no backend needed in CI.
+- **Playwright E2E Tests** — browser-based end-to-end tests for auth flow, wallet management, alert rules CRUD, wallet dashboard (balances, transactions), and WebSocket connectivity using MSW (Mock Service Worker) for API mocking — no backend needed in CI.
 
 ## Development
 
@@ -73,13 +75,46 @@ The frontend is a React 18 SPA built with Vite and Tailwind CSS, located at `app
 - **Socket.io Client** — real-time WebSocket connection with auto-reconnect
 - **MSW (Mock Service Worker)** — API mocking for E2E tests
 
+### Components
+
+| Component | File | Description |
+|-----------|------|-------------|
+| WalletDashboard | `src/components/WalletDashboard.tsx` | Wallet list with add/remove, SOL balance (◎ lamports via BigInt), SPL token balances with USD values, recent transactions table, Socket.io live updates with animated notification banner |
+
 ### Pages
 
 | Page | Route | Description |
 |------|-------|-------------|
 | Login | `/login` | Email/password login with form validation |
 | Register | `/register` | User registration with form validation |
-| Dashboard | `/dashboard` | Wallet management (add/delete), alert rules CRUD, WebSocket live updates |
+| Dashboard | `/dashboard` | Renders WalletDashboard — wallet management (add/delete), balances, transactions, Socket.io live updates |
+
+### API Client Types
+
+The frontend API client at `src/services/api.ts` defines these types for the wallet dashboard:
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `TokenBalance` | `mint`, `symbol`, `amount` (string), `decimals`, `usdValue?` | SPL token balance — amount stored as string (lamports) to avoid float issues |
+| `WalletBalance` | `walletId`, `address`, `chain`, `solBalance` (string), `tokens` (TokenBalance[]), `updatedAt` | Wallet balance with SOL and SPL tokens |
+| `Transaction` | `id`, `walletId`, `signature`, `type` (send/receive/swap/other), `amount` (string), `symbol`, `fee`, `timestamp`, `status` (confirmed/pending/failed) | On-chain transaction record |
+
+### API Clients
+
+| Client | Methods | Endpoints |
+|--------|---------|-----------|
+| `balancesApi` | `findAll()`, `findByWalletId(id)` | `GET /api/balances`, `GET /api/wallets/:id/balances` |
+| `transactionsApi` | `findAll()`, `findByWalletId(id)` | `GET /api/transactions`, `GET /api/wallets/:id/transactions` |
+
+### Socket.io Events
+
+The frontend connects to the WebSocket gateway with JWT auth token and handles these events:
+
+| Event | Payload | Behavior |
+|-------|---------|----------|
+| `wallet_update` | `{ walletId, type }` | Shows notification banner, refetches all data |
+| `balance_update` | `{ walletId, solBalance }` | Shows notification banner, optimistically updates balance in state |
+| `new_transaction` | `Transaction` object | Shows notification banner with amount and symbol, prepends transaction to list |
 
 ### Running the Frontend
 
@@ -89,7 +124,7 @@ npm install
 npm run dev          # starts Vite dev server on port 5173
 ```
 
-The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL` env var).
+The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL` env var). WebSocket URL is configurable via `VITE_WS_URL` — defaults to same host.
 
 ### Building for Production
 
@@ -130,7 +165,7 @@ The E2E tests use MSW (Mock Service Worker) to mock all API responses — no bac
 - **Auth flow**: register, login, logout, invalid login, unauthenticated redirect
 - **Wallet flow**: add Solana/ETH wallet, view balances, delete wallet, empty state
 - **Alert rules**: create balance_low/high/transaction rules, verify in list, empty state
-- **WebSocket**: connection handling, graceful disconnection
+- **WebSocket**: connection handling, graceful disconnection, live update events
 
 ### Test Coverage by Service
 
@@ -166,7 +201,7 @@ Two GitHub Actions workflows run on every PR:
 
 - **Root `jest.config.js`** — project references for all 5 apps with 70% global coverage threshold
 - **`apps/frontend/playwright.config.ts`** — Playwright config with Chromium, HTML reporter, and Vite dev server auto-start
-- **`apps/frontend/src/mocks/handlers.ts`** — MSW handlers for all API endpoints (auth, wallets, alert rules, WebSocket)
+- **`apps/frontend/src/mocks/handlers.ts`** — MSW handlers for all API endpoints (auth, wallets, alert rules, balances, transactions, WebSocket)
 
 ## Project Structure
 
@@ -175,7 +210,7 @@ apps/
   frontend/                 React SPA (Vite + React 18 + Tailwind)
     e2e/                    Playwright E2E tests
     src/
-      components/           Shared UI components (Layout)
+      components/           Shared UI components (Layout, WalletDashboard)
       hooks/                Custom React hooks (useAuth)
       mocks/                MSW handlers for E2E testing
       pages/                Page components (Login, Register, Dashboard)
@@ -230,6 +265,14 @@ The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` 
 - `GET /api/wallets` — list user's wallets
 - `GET /api/wallets/:id` — get single wallet (UUID)
 - `DELETE /api/wallets/:id` — delete wallet
+
+### Balances (JWT required, JwtAuthGuard)
+- `GET /api/balances` — list balances for all user's wallets (includes SOL balance in lamports and SPL token balances)
+- `GET /api/wallets/:id/balances` — get balance for a specific wallet
+
+### Transactions (JWT required, JwtAuthGuard)
+- `GET /api/transactions` — list recent transactions for all user's wallets
+- `GET /api/wallets/:id/transactions` — get transactions for a specific wallet
 
 ### Alert Rules (JWT required, JwtAuthGuard)
 - `POST /api/alert-rules` — create rule `{walletId, chain, type, threshold?}`
@@ -297,6 +340,10 @@ The WebSocket gateway at `apps/api-service/src/ws/ws.gateway.ts` provides real-t
 - **Events emitted:**
   - `wallet:updated` — wallet balance change notification
   - `alert:triggered` — alert rule triggered notification
+- **Events received (frontend → backend):**
+  - `wallet_update` — wallet added/removed/updated
+  - `balance_update` — SOL or token balance changed
+  - `new_transaction` — new on-chain transaction detected
 - **Auto-reconnect:** The frontend Socket.io client reconnects automatically with exponential backoff
 
 ## Deployment

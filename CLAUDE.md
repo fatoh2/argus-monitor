@@ -21,11 +21,11 @@ apps/
   frontend/                 React SPA (Vite + React 18 + Tailwind)
     e2e/                    Playwright E2E tests (auth, wallets, alert rules, WebSocket)
     src/
-      components/           Shared UI components (Layout)
+      components/           Shared UI components (Layout, WalletDashboard)
       hooks/                Custom React hooks (useAuth)
-      mocks/                MSW handlers for E2E testing
+      mocks/                MSW handlers for E2E testing (auth, wallets, balances, transactions)
       pages/                Page components (Login, Register, Dashboard)
-      services/             API client and WebSocket service
+      services/             API client (types: Wallet, WalletBalance, TokenBalance, Transaction) and WebSocket service
     jest.config.cjs         Jest config — excludes e2e dir from Jest
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
@@ -112,13 +112,24 @@ The frontend is a React 18 SPA at `apps/frontend/` built with Vite and Tailwind 
 |------|-------|-------------|
 | Login | `/login` | Email/password login with form validation |
 | Register | `/register` | User registration with form validation |
-| Dashboard | `/dashboard` | Wallet management (add/delete), alert rules CRUD, WebSocket live updates |
+| Dashboard | `/dashboard` | Wallet dashboard with wallet list, SOL/SPL balances, recent transactions table, alert rules CRUD, and Socket.io live updates |
+
+### WalletDashboard Component
+
+The dashboard is powered by `WalletDashboard` (`apps/frontend/src/components/WalletDashboard.tsx`):
+- **Wallet list** with add/remove, chain badges, truncated addresses
+- **SOL balance** displayed as ◎ with lamports formatted via BigInt
+- **SPL token balances** (USDC, mSOL) with amounts and USD values
+- **Recent transactions table** with type, amount, signature, status badge, relative time
+- **Socket.io live updates** — connects with JWT auth token, handles `wallet_update`, `balance_update`, `new_transaction` events with animated notification banner
+- **MSW mocks** for `/api/balances`, `/api/wallets/:id/balances`, `/api/transactions`, `/api/wallets/:id/transactions`
+- All monetary amounts stored as strings (lamports), never floats
 
 ### E2E Test Scenarios
 - **Auth flow**: register, login, logout, invalid login, unauthenticated redirect
 - **Wallet flow**: add Solana/ETH wallet, view balances, delete wallet, empty state
 - **Alert rules**: create balance_low/high/transaction rules, verify in list, empty state
-- **WebSocket**: connection handling, graceful disconnection
+- **WebSocket**: connection handling, graceful disconnection, live wallet/balance/transaction updates (uses `transactions-section` test ID)
 
 ### MSW Handlers
 All API endpoints are mocked in `apps/frontend/src/mocks/handlers.ts` for E2E testing:

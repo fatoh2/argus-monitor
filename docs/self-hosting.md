@@ -31,9 +31,11 @@ npm run dev          # starts Vite dev server on port 5173
 
 The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL`).
 
+The dashboard (`/dashboard`) renders the `WalletDashboard` component which provides wallet management, SOL/SPL token balances, recent transactions, and Socket.io live updates. All monetary amounts use BigInt (lamports) — no floating-point arithmetic. The dashboard works fully with MSW mocks for development without a backend.
+
 ## Architecture Overview
 
-Argus Monitor consists of a React frontend, six NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching.
+Argus Monitor consists of a React frontend, six NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching. The frontend communicates with the API service via HTTP (REST) and WebSocket (Socket.io) for real-time live updates on wallet balances and transactions.
 
 ```
 ┌──────────────────┐
