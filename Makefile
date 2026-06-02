@@ -17,6 +17,13 @@
 
 .DEFAULT_GOAL := help
 
+# ── Default environment variables ────────────────────────────────────────────
+# These are used by targets that connect to postgres/redis containers.
+# Override via shell environment or by passing on the command line:
+#   make psql POSTGRES_USER=admin POSTGRES_DB=mydb
+POSTGRES_USER ?= argus
+POSTGRES_DB   ?= argus
+
 .PHONY: help up down migrate migrate-prod seed check test logs psql redis-cli reset
 
 help: ## Show this help
@@ -41,14 +48,14 @@ seed: ## Seed the database
 check: ## TypeScript type-check (api-service) — runs inside Docker for consistency
 	docker compose run --rm api-service npx tsc --noEmit --project apps/api-service/tsconfig.json
 
-test: ## Run all workspace tests
-	npm test --workspaces
+test: ## Run all workspace tests (inside Docker for consistency)
+	docker compose run --rm api-service npm test
 
 logs: ## Tail all container logs
 	docker compose logs -f
 
 psql: ## Open psql shell in postgres (requires running containers)
-	docker compose exec postgres psql -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus}
+	docker compose exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
 redis-cli: ## Open redis-cli in redis (requires running containers)
 	docker compose exec redis redis-cli
@@ -56,10 +63,12 @@ redis-cli: ## Open redis-cli in redis (requires running containers)
 reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), seed, start all
 	docker compose down -v
 	docker compose up -d postgres redis
+	@echo "Checking that containers started..."
+	@docker compose ps --status running --format '{{.Name}}' postgres | grep -q postgres || { echo "ERROR: postgres container failed to start"; exit 1; }
+	@docker compose ps --status running --format '{{.Name}}' redis | grep -q redis || { echo "ERROR: redis container failed to start"; exit 1; }
 	@echo "Waiting for postgres to be healthy..."
-	@sleep 3
 	@for i in $$(seq 1 30); do \
-		if docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus} >/dev/null 2>&1; then \
+		if docker compose exec -T postgres pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB) >/dev/null 2>&1; then \
 			echo "Postgres is healthy!"; \
 			break; \
 		fi; \
