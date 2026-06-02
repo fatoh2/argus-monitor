@@ -82,21 +82,29 @@ The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` 
 - `DELETE /api/chains/:id` — delete chain
 
 ### Global Exception Filter
-The api-service registers a global `AllExceptionsFilter` in `main.ts` that catches all unhandled exceptions:
+The api-service registers a global `AllExceptionsFilter` in `main.ts` that catches all unhandled exceptions. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost`:
 
+```typescript
+// main.ts
+const { httpAdapter } = app.get(HttpAdapterHost);
+app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
+```
+
+**Exception handling:**
 - **HttpException** — passes through the original status code and message
 - **PrismaClientKnownRequestError** — mapped to HTTP status codes:
-  - `P2002` (unique constraint) → `409 Conflict` with message `"Resource already exists"`
-  - `P2025` (record not found) → `404 Not Found` with message `"Resource not found"`
+  - `P2002` (unique constraint) → `409 Conflict` with message `"Resource already exists."`
+  - `P2025` (record not found) → `404 Not Found` with message `"Resource not found."`
+  - `P2003` (foreign key constraint) → `400 Bad Request` with message `"Invalid foreign key."`
   - Other Prisma errors → `500 Internal Server Error` with message `"Internal server error"`
 - **All other exceptions** → `500 Internal Server Error` with message `"Internal server error"`
 
 **Production behavior** (`NODE_ENV=production`):
-- Response body: `{ statusCode, message }` only — NO stack trace
-- All 5xx errors are logged with: request ID, user ID, HTTP method, URL, and stack trace
+- Response body: `{ statusCode, message }` only — NO stack trace, NO timestamp, NO path
+- Internal server errors always return generic `"Internal server error"` message
 
 **Development behavior** (any other `NODE_ENV`):
-- Response body includes `stack` field for debugging
+- Response body includes `timestamp`, `path`, and `stack` fields for debugging
 
 **Source:** `apps/api-service/src/common/filters/all-exceptions.filter.ts`
 
@@ -105,9 +113,9 @@ All repository methods wrap Prisma calls with `try/catch` using the shared `hand
 
 | Prisma Error | HTTP Status | Message |
 |---|---|---|
-| `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists"` |
-| `P2025` (record not found) | `404 Not Found` | `"Resource not found"` |
-| `P2003` (foreign key) | `400 Bad Request` | `"Referenced resource does not exist"` |
+| `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
+| `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
+| `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
 | Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` (logged with full context) |
 
 **Services using `handlePrismaError()`:** `WalletsService`, `ChainsService`, `AuthService`, `AlertRulesService` — all CRUD methods.

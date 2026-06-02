@@ -12,7 +12,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Solana Blockchain Adapter** — Helius RPC integration with rate limiter & circuit breaker
 - **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
 - **Health Checks** — `/api/health` endpoint for all services
-- **Global Exception Filter** — In production, unhandled errors return only `statusCode` and a generic `message` (no stack traces, timestamp, or path). Prisma errors are mapped to specific HTTP status codes: `P2002` (unique constraint) to 409 Conflict, `P2025` (record not found) to 404 Not Found, `P2003` (foreign key constraint) to 400 Bad Request, and other unexpected Prisma errors to 500 Internal Server Error. All 5xx errors are logged with redacted request context (body and query params masked via `redact()`).
+- **Global Exception Filter** — In production, unhandled errors return only `{statusCode, message}` (no stack traces, timestamp, or path). In development, responses include `timestamp`, `path`, and `stack` for debugging. Prisma errors are mapped to specific HTTP status codes: `P2002` (unique constraint) to 409 Conflict, `P2025` (record not found) to 404 Not Found, `P2003` (foreign key constraint) to 400 Bad Request, and other unexpected Prisma errors to 500 Internal Server Error. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost` in `main.ts`.
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
@@ -128,9 +128,9 @@ All repository methods in the API service wrap Prisma calls with `try/catch` usi
 
 | Prisma Error Code | Meaning | HTTP Status | Response Message |
 |---|---|---|---|
-| `P2002` | Unique constraint violation | `409 Conflict` | `"Resource already exists"` |
-| `P2025` | Record not found | `404 Not Found` | `"Resource not found"` |
-| `P2003` | Foreign key constraint violation | `400 Bad Request` | `"Referenced resource does not exist"` |
+| `P2002` | Unique constraint violation | `409 Conflict` | `"Resource already exists."` |
+| `P2025` | Record not found | `404 Not Found` | `"Resource not found."` |
+| `P2003` | Foreign key constraint violation | `400 Bad Request` | `"Invalid foreign key."` |
 | Other | Unexpected Prisma error | `500 Internal Server Error` | `"Internal server error"` (logged server-side with full context) |
 
 **Services using `handlePrismaError()`:**
