@@ -7,7 +7,7 @@
 #   make migrate     — run prisma migrations (development)
 #   make migrate-prod — run prisma migrations (production-style deploy)
 #   make seed        — seed the database
-#   make check       — TypeScript type-check (api-service)
+#   make check       — TypeScript type-check (all apps)
 #   make test        — run all workspace tests
 #   make logs        — tail all container logs
 #   make psql        — open psql shell in postgres (requires running containers)
@@ -47,8 +47,8 @@ migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
-check: ## TypeScript type-check (all apps) — runs inside Docker for consistency
-	docker compose run --rm -v $(PWD)/tsconfig.json:/app/tsconfig.json -v $(PWD)/tsconfig.base.json:/app/tsconfig.base.json -v $(PWD)/apps:/app/apps -v $(PWD)/packages:/app/packages api-service npx tsc --noEmit
+check: ## TypeScript type-check (all apps) — runs on host for full workspace coverage
+	npx tsc --noEmit
 
 test: ## Run all workspace tests (inside Docker for consistency)
 	docker compose run --rm api-service npm test
@@ -147,9 +147,10 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	@echo ""
 	@echo "🚀 Step 4/7: Starting all services..."
 	@docker compose up -d
-	@sleep 3
 	@echo ""
 	@echo "🔍 Step 5/7: Waiting for all service health checks..."
+	@echo "  (waiting 10s for containers to initialize before polling)..."
+	@sleep 10
 	@for service in \
 		"api-service http://localhost:3000/api/health" \
 		"chain-indexer http://localhost:3001/health" \
@@ -201,5 +202,5 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@echo "=========================================="
 	@echo ""
 	@echo "🧹 Cleaning up..."
-	@docker compose down -v 2>/dev/null || true
+	@docker compose down 2>/dev/null || true
 	@echo "  ✅ cleanup complete"
