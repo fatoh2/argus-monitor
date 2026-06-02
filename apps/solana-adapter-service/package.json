@@ -79,6 +79,9 @@
     "displayName": "solana-adapter-service",
     "moduleNameMapper": {
       "^@argus/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts"
-    }
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uuid)/)"
+    ]
   }
 }
