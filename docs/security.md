@@ -25,7 +25,7 @@ Argus Monitor implements a robust JWT authentication system with enhanced securi
 
 - **Cookie Parser Middleware:** The `cookie-parser` middleware is registered globally in `main.ts` to enable reading cookies from incoming requests.
 
-- **JWT Secret Safety:** The `AllExceptionsFilter` ensures JWT secrets are never leaked in production error responses. Stack traces are stripped in production mode.
+- **JWT Secret Safety:** The `AllExceptionsFilter` ensures JWT secrets are never leaked in production error responses. Production responses return only `{statusCode, message}` — no stack traces, timestamp, or path.
 
 This architecture provides a strong defense against common web vulnerabilities:
 - **XSS:** Refresh tokens are httpOnly — not accessible via JavaScript
@@ -40,9 +40,9 @@ All repository methods in the API service wrap Prisma calls with `try/catch` usi
 
 | Prisma Error Code | Meaning | HTTP Response | Security Benefit |
 |---|---|---|---|
-| `P2002` | Unique constraint violation | `409 Conflict` — `"Resource already exists"` | Prevents enumeration attacks (no detail on which field conflicted) |
-| `P2025` | Record not found | `404 Not Found` — `"Resource not found"` | Consistent error messages prevent resource enumeration |
-| `P2003` | Foreign key violation | `400 Bad Request` — `"Referenced resource does not exist"` | Generic message doesn't reveal schema details |
+| `P2002` | Unique constraint violation | `409 Conflict` — `"Resource already exists."` | Prevents enumeration attacks (no detail on which field conflicted) |
+| `P2025` | Record not found | `404 Not Found` — `"Resource not found."` | Consistent error messages prevent resource enumeration |
+| `P2003` | Foreign key violation | `400 Bad Request` — `"Invalid foreign key."` | Generic message doesn't reveal schema details |
 | Other | Unexpected Prisma error | `500 Internal Server Error` — `"Internal server error"` | Full error logged server-side only; never exposed to client |
 
 **Services using `handlePrismaError()`:** `WalletsService`, `ChainsService`, `AuthService`, `AlertRulesService` — all CRUD methods.
@@ -73,11 +73,9 @@ The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` provide
 
 ### Where Redaction Is Applied
 
-1. **Global Exception Filter** — When logging 5xx errors, the `AllExceptionsFilter` now redacts `request.body` and `request.query` before writing to the log. This prevents secrets sent in request payloads from appearing in error logs.
+1. **Solana Consumer** — Wallet addresses in logs are partially redacted (first 4 + last 4 characters preserved) for traceability without exposing full addresses.
 
-2. **Solana Consumer** — Wallet addresses in logs are partially redacted (first 4 + last 4 characters preserved) for traceability without exposing full addresses.
-
-3. **All Service Bootstrap Logs** — All six services now use NestJS `Logger` (structured, level-aware) instead of `console.log`, ensuring consistent log formatting and level filtering.
+2. **All Service Bootstrap Logs** — All six services now use NestJS `Logger` (structured, level-aware) instead of `console.log`, ensuring consistent log formatting and level filtering.
 
 ### Automated Enforcement
 
@@ -131,6 +129,8 @@ All public endpoints are rate-limited to prevent abuse:
 
 ### Global Exception Filter
 
-- No stack traces in production responses
-- Prisma errors mapped to proper HTTP status codes
-- All 5xx errors logged with request context (request ID, user ID, URL)
+- Production responses return only `{statusCode, message}` — no stack traces, timestamp, or path
+- Development responses include `timestamp`, `path`, and `stack` for debugging
+- Prisma errors mapped to proper HTTP status codes (`P2002` → 409, `P2025` → 404, `P2003` → 400, others → 500)
+- All errors logged with HTTP status and request URL
+- Extends `BaseExceptionFilter` from `@nestjs/core`, registered via `HttpAdapterHost`
