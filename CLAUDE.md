@@ -6,19 +6,26 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 
 ## Stack
 - **Backend**: NestJS + TypeScript (strict mode)
-- **Frontend**: React + TypeScript + Tailwind CSS + TanStack Query + Recharts + Socket.io
+- **Frontend**: React + TypeScript + Tailwind CSS + Socket.io + MSW
 - **Database**: PostgreSQL via Prisma
 - **Queue**: Redis + BullMQ
 - **Real-time**: NestJS WebSocket Gateway + Socket.io
 - **Chain**: Solana via Helius API + @solana/web3.js
 - **Testing**: Jest + ts-jest + supertest (backend), Playwright (E2E)
-- **CI**: GitHub Actions (test.yml — PostgreSQL + Redis services on every PR)
+- **CI**: GitHub Actions (test.yml — PostgreSQL + Redis services on every PR; playwright.yml — E2E on frontend changes)
 - **Local dev**: docker-compose.yml, Makefile (see `make help`)
 
 ## Repo Structure
 ```
 apps/
-  frontend/                 React app
+  frontend/                 React SPA (Vite + React 18 + Tailwind)
+    e2e/                    Playwright E2E tests (auth, wallets, alert rules, WebSocket)
+    src/
+      components/           Shared UI components (Layout)
+      hooks/                Custom React hooks (useAuth)
+      mocks/                MSW handlers for E2E testing
+      pages/                Page components (Login, Register, Dashboard)
+      services/             API client and WebSocket service
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
@@ -38,7 +45,8 @@ packages/
   shared-types/             Enums, queue names, job payload types, ChainAdapter interface
 k8s/apps/                   Helm charts for all services
 .github/workflows/
-  test.yml                  CI pipeline — runs on every PR (PostgreSQL + Redis services)
+  test.yml                  Backend CI — PostgreSQL + Redis on every PR
+  playwright.yml            Frontend E2E — Playwright tests on frontend changes
 jest.config.js              Root Jest config with project references for all 5 apps
 docker-compose.yml          Local dev — all services + PostgreSQL + Redis (env_file pattern)
 docker-compose.prod.yml     Self-hosted production
@@ -47,12 +55,20 @@ Makefile                    Dev commands (up, down, migrate, seed, test, check, 
 
 ## Testing
 
-### Running Tests
+### Running Backend Tests
 ```bash
 npm test              # all unit tests (228 tests, 36 suites)
 npm run test:cov      # with coverage (70% threshold)
 npm run test:e2e      # E2E tests (requires PostgreSQL)
 make test             # via Docker
+```
+
+### Running Frontend E2E Tests
+```bash
+cd apps/frontend
+npm install
+npx playwright install chromium
+VITE_E2E_TEST=true npx playwright test
 ```
 
 ### Test Coverage by Service
@@ -61,15 +77,56 @@ make test             # via Docker
 - **alert-service** (3 files): AlertEngineService (all rule types)
 - **notification-service** (4 files): TelegramService (send, format, error handling)
 - **chain-indexer-service** (3 files): AppController, AppService, HealthController
+- **frontend** (4 E2E spec files): Auth flow, wallet management, alert rules CRUD, WebSocket connectivity
 
-### CI Pipeline
-The `.github/workflows/test.yml` workflow runs on every PR to `develop` or `main`:
+### CI Pipelines
+
+**Backend CI (`.github/workflows/test.yml`)** — runs on every PR to `develop` or `main`:
 1. Spins up PostgreSQL 16 + Redis 7 service containers
 2. Installs deps, generates Prisma client, runs migrations
 3. TypeScript check (`tsc --noEmit`)
 4. Lint check
 5. Tests with coverage (70% threshold)
 6. Uploads coverage artifacts
+
+**Playwright E2E (`.github/workflows/playwright.yml`)** — runs on PRs touching `apps/frontend/`:
+1. Installs dependencies (`npm ci`)
+2. Installs Playwright Chromium browser
+3. Generates MSW service worker
+4. Runs Playwright tests with `VITE_E2E_TEST=true`
+5. Uploads Playwright report as artifact
+
+## Frontend Details
+
+The frontend is a React 18 SPA at `apps/frontend/` built with Vite and Tailwind CSS.
+
+### Pages
+| Page | Route | Description |
+|------|-------|-------------|
+| Login | `/login` | Email/password login with form validation |
+| Register | `/register` | User registration with form validation |
+| Dashboard | `/dashboard` | Wallet management (add/delete), alert rules CRUD, WebSocket live updates |
+
+### E2E Test Scenarios
+- **Auth flow**: register, login, logout, invalid login, unauthenticated redirect
+- **Wallet flow**: add Solana/ETH wallet, view balances, delete wallet, empty state
+- **Alert rules**: create balance_low/high/transaction rules, verify in list, empty state
+- **WebSocket**: connection handling, graceful disconnection
+
+### MSW Handlers
+All API endpoints are mocked in `apps/frontend/src/mocks/handlers.ts` for E2E testing:
+- Auth: register, login, logout, me, refresh
+- Wallets: create, list, get, delete
+- Alert rules: create, list, get, delete
+- WebSocket: connection events
+
+### Running Locally
+```bash
+cd apps/frontend
+npm install
+npm run dev          # Vite dev server on port 5173
+npm run build        # Production build to apps/frontend/dist/
+```
 
 ## API Service Details
 
@@ -148,22 +205,30 @@ All repository methods wrap Prisma calls with `try/catch` using the shared `hand
 | `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
 | `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
 | `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"`
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` |
+
+**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
 ### Rate Limiting
 Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
 
-| Scope | Limit | TTL | Exemptions |
-|-------|-------|-----|------------|
-| Global (all endpoints) | 100 requests | 60 seconds | — |
-| Auth endpoints | 10 requests | 60 seconds | — |
-| Health endpoint | Unlimited | — | Exempt via `@SkipThrottle()` |
-
-Rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
+- **Global:** 100 requests per 60 seconds per IP
+- **Auth endpoints:** 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
+- **Health endpoint:** exempt from rate limiting (`@SkipThrottle()`)
+- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
 
 ### Secret Redaction
-All log calls use NestJS `Logger` (not `console.log`). The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
+All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
 
-## Environment Variables
+### Validation
+All DTOs use `class-validator` with `whitelist: true` (strips unknown properties) and `transform: true` (coerces types like string → number for query params). The validation pipe is registered globally in `main.ts`.
 
-See [docs/self-hosting.md](docs/self-hosting.md) for the full reference of all environment variables.
+### WebSocket Gateway
+The WebSocket gateway at `apps/api-service/src/ws/ws.gateway.ts` provides real-time updates:
+
+- **Namespace:** `/ws`
+- **Authentication:** JWT token sent as `auth.token` in the connection handshake
+- **Events emitted:**
+  - `wallet:updated` — wallet balance change notification
+  - `alert:triggered` — alert rule triggered notification
+- **Auto-reconnect:** The frontend Socket.io client reconnects automatically with exponential backoff

@@ -4,10 +4,11 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 
 ## Features
 
+- **React Frontend** — Vite + React 18 + TypeScript + Tailwind CSS with auth pages (Login, Register), wallet dashboard, and alert rules management
 - **JWT Authentication** — register, login, refresh tokens, logout, profile endpoint. Short-lived access tokens (15 min) with httpOnly refresh token cookies (7 days) for secure session management.
 - **Wallet Management** — add, list, view, and delete blockchain wallet addresses
 - **Alert Rules** — create, list, view, and delete alert rules per wallet
-- **Real-time WebSocket Gateway** — authenticated connections, wallet updates, alert triggers
+- **Real-time WebSocket Gateway** — authenticated connections, wallet updates, alert triggers (Socket.io with auto-reconnect)
 - **Chain Management** — admin CRUD for supported blockchain networks
 - **Solana Blockchain Adapter** — Helius RPC integration with rate limiter & circuit breaker
 - **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
@@ -17,6 +18,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
 - **Comprehensive Test Suite** — 228 unit + integration tests across all 5 microservices (36 test suites), with 70% coverage threshold enforced via Jest project references. CI pipeline runs tests with PostgreSQL + Redis on every PR.
+- **Playwright E2E Tests** — browser-based end-to-end tests for auth flow, wallet management, alert rules CRUD, and WebSocket connectivity using MSW (Mock Service Worker) for API mocking — no backend needed in CI.
 
 ## Development
 
@@ -56,11 +58,50 @@ make reset       # tears down volumes, recreates infra, migrates, seeds, starts 
 
 The `reset` target waits for PostgreSQL and Redis to become healthy before running migrations, ensuring a reliable one-command rebuild.
 
+## Frontend
+
+The frontend is a React 18 SPA built with Vite and Tailwind CSS, located at `apps/frontend/`.
+
+### Tech Stack
+
+- **Vite** — fast dev server and build tool
+- **React 18** — UI library with functional components and hooks
+- **TypeScript** — strict mode
+- **Tailwind CSS** — utility-first CSS framework
+- **React Router DOM v6** — client-side routing
+- **Socket.io Client** — real-time WebSocket connection with auto-reconnect
+- **MSW (Mock Service Worker)** — API mocking for E2E tests
+
+### Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Login | `/login` | Email/password login with form validation |
+| Register | `/register` | User registration with form validation |
+| Dashboard | `/dashboard` | Wallet management (add/delete), alert rules CRUD, WebSocket live updates |
+
+### Running the Frontend
+
+```bash
+cd apps/frontend
+npm install
+npm run dev          # starts Vite dev server on port 5173
+```
+
+The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL` env var).
+
+### Building for Production
+
+```bash
+cd apps/frontend
+npm run build        # outputs to apps/frontend/dist/
+```
+
 ## Testing
 
-Argus Monitor has a comprehensive test suite with **228 tests across 36 suites** covering all 5 microservices.
+Argus Monitor has a comprehensive test suite with **228 tests across 36 suites** covering all 5 microservices, plus Playwright E2E tests for the frontend.
 
-### Running Tests
+### Running Backend Tests
 
 ```bash
 npm test              # run all unit tests (228 tests, 36 suites)
@@ -74,6 +115,22 @@ Tests can also be run via Docker for consistency:
 make test             # runs `npm test` inside the api-service container
 ```
 
+### Running Frontend E2E Tests
+
+```bash
+cd apps/frontend
+npm install
+npx playwright install chromium
+VITE_E2E_TEST=true npx playwright test
+```
+
+The E2E tests use MSW (Mock Service Worker) to mock all API responses — no backend or database needed. Tests cover:
+
+- **Auth flow**: register, login, logout, invalid login, unauthenticated redirect
+- **Wallet flow**: add Solana/ETH wallet, view balances, delete wallet, empty state
+- **Alert rules**: create balance_low/high/transaction rules, verify in list, empty state
+- **WebSocket**: connection handling, graceful disconnection
+
 ### Test Coverage by Service
 
 | Service | Test Files | What's Tested |
@@ -84,10 +141,11 @@ make test             # runs `npm test` inside the api-service container
 | **notification-service** | 4 test files | TelegramService (send, format, error handling) |
 | **chain-indexer-service** | 3 test files | AppController, AppService, HealthController |
 
-### CI Pipeline
+### CI Pipelines
 
-A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every PR to `develop` or `main`:
+Two GitHub Actions workflows run on every PR:
 
+**Backend CI (`.github/workflows/test.yml`)** — runs on every PR to `develop` or `main`:
 1. Spins up PostgreSQL 16 and Redis 7 as service containers
 2. Installs dependencies (`npm ci`)
 3. Generates Prisma client and runs migrations
@@ -96,91 +154,51 @@ A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every PR to `de
 6. Runs all tests with coverage (70% threshold)
 7. Uploads coverage reports as artifacts
 
+**Playwright E2E (`.github/workflows/playwright.yml`)** — runs on PRs touching `apps/frontend/`:
+1. Installs dependencies (`npm ci`)
+2. Installs Playwright Chromium browser
+3. Generates MSW service worker
+4. Runs Playwright tests with `VITE_E2E_TEST=true`
+5. Uploads Playwright report as artifact
+
 ### Test Infrastructure
 
 - **Root `jest.config.js`** — project references for all 5 apps with 70% global coverage threshold
-- **Per-app `jest.config.js`** — each app has its own config with coverage exclusions (main.ts, module files, spec files)
-- **`tsconfig.json`** — added for apps that were missing it
-- **`test/jest-e2e-config.json`** — E2E test configuration for api-service (supertest)
+- **`apps/frontend/playwright.config.ts`** — Playwright config with Chromium, HTML reporter, and Vite dev server auto-start
+- **`apps/frontend/src/mocks/handlers.ts`** — MSW handlers for all API endpoints (auth, wallets, alert rules, WebSocket)
 
-## Architecture
-
-Argus Monitor is a **monorepo** with multiple NestJS microservices:
-
-| Service | Port | Description |
-|---------|------|-------------|
-| `api-service` | 3000 | Auth, wallets, alert rules, WebSocket gateway |
-| `chain-indexer-service` | 3001 | BullMQ job scheduler for blockchain indexing |
-| `solana-adapter-service` | 3002 | Helius RPC integration with rate limiter & circuit breaker |
-| `alert-service` | 3003 | Alert rule evaluation engine |
-| `notification-service` | 3004 | Telegram bot notifications |
-
-Services communicate via **BullMQ queues** (Redis-backed) — no direct HTTP between services.
-
-### BullMQ Queues
-
-| Queue Name | Producer | Consumer | Payload |
-|------------|----------|----------|---------|
-| `chain:indexer` | API service | Chain indexer | `{walletId, chainType, address}` |
-| `solana:fetch` | Chain indexer | Solana adapter | `{walletId, address, monitorType}` |
-| `alert:evaluation` | Solana adapter | Alert service | `{walletId, alertRuleId, currentValue, threshold, condition}` |
-| `notification:dispatch` | Alert service | Notification service | `{alertId, walletId, channel, message}` |
-
-### Shared Packages
-
-| Package | Description |
-|---------|-------------|
-| `@argus/adapter-sdk` | Published chain-adapter SDK (npm) |
-| `@argus/shared-types` | Enums, queue names, job payload types, ChainAdapter interface |
-
-### ChainAdapter Interface
-
-All blockchain adapters implement the `ChainAdapter` interface from `@argus/shared-types`:
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `getNativeBalance(address)` | `NativeBalance` | Native currency balance (SOL/ETH) in smallest unit (BIGINT) |
-| `getTokenBalances(address)` | `TokenBalance[]` | Token/SPL balances, skips zero-balance tokens |
-| `getRecentTransactions(address, limit?)` | `Transaction[]` | Recent transactions normalized to standard format |
-| `checkRpcHealth(endpoint)` | `RpcHealthResult` | Latency + block height health check |
-| `getChainType()` | `string` | Chain identifier (`solana`, `evm`) |
-
-**Data types:**
-- `NativeBalance` — `{address, balance: bigint, decimals, symbol}`
-- `TokenBalance` — `{address, mint, amount: bigint, decimals, symbol, name}`
-- `Transaction` — `{hash, from, to, value: bigint, timestamp, status, fee, tokenTransfers?}`
-- `RpcHealthResult` — `{isHealthy, latencyMs, currentBlock?, error?}`
-
-## Repo Structure
+## Project Structure
 
 ```
-argus-monitor/
-├── apps/
-│   ├── api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
-│   │   ├── src/
-│   │   │   ├── auth/             JWT auth (register, login, refresh, logout)
-│   │   │   ├── wallets/          Wallet CRUD
-│   │   │   ├── alert-rules/      Alert rule CRUD
-│   │   │   ├── chains/           Chain management (admin)
-│   │   │   ├── websockets/       WebSocket gateway
-│   │   │   ├── prisma/           Prisma service
-│   │   │   ├── common/           Filters, pipes, error handlers, logger
-│   │   │   └── health/           Health check endpoint
-│   │   └── test/                 E2E integration tests (supertest)
-│   ├── chain-indexer-service/    BullMQ job scheduler
-│   ├── solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
-│   ├── alert-service/            Alert rule evaluation engine
-│   └── notification-service/     Telegram bot notifications
-├── packages/
-│   ├── chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
-│   └── shared-types/             Enums, queue names, job payload types, ChainAdapter interface
-├── k8s/apps/                     Helm charts for all services
-├── .github/workflows/            CI pipelines (test.yml runs on every PR)
-├── jest.config.js                Root Jest config with project references
-├── docker-compose.yml            Local dev — all services + PostgreSQL + Redis
-├── docker-compose.prod.yml       Self-hosted production
-├── Makefile                      Dev commands (up, down, migrate, test, etc.)
-└── package.json                  Workspace root with shared scripts
+apps/
+  frontend/                 React SPA (Vite + React 18 + Tailwind)
+    e2e/                    Playwright E2E tests
+    src/
+      components/           Shared UI components (Layout)
+      hooks/                Custom React hooks (useAuth)
+      mocks/                MSW handlers for E2E testing
+      pages/                Page components (Login, Register, Dashboard)
+      services/             API client and WebSocket service
+  api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
+    src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
+    src/common/prisma-error.handler.ts  Shared Prisma error handler
+    src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests
+    test/app.e2e-spec.ts    E2E integration tests (supertest) for all REST endpoints
+  chain-indexer-service/    BullMQ job scheduler
+  solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
+  alert-service/            Alert rule evaluation engine
+  notification-service/     Telegram bot notifications
+packages/
+  chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
+  shared-types/             Enums, queue names, job payload types, ChainAdapter interface
+k8s/apps/                   Helm charts for all services
+.github/workflows/
+  test.yml                  Backend CI — PostgreSQL + Redis on every PR
+  playwright.yml            Frontend E2E — Playwright tests on frontend changes
+jest.config.js              Root Jest config with project references for all 5 apps
+docker-compose.yml          Local dev — all services + PostgreSQL + Redis (env_file pattern)
+docker-compose.prod.yml     Self-hosted production
+Makefile                    Dev commands (up, down, migrate, seed, test, check, reset)
 ```
 
 ## API Service Details
@@ -234,52 +252,51 @@ const { httpAdapter } = app.get(HttpAdapterHost);
 app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
 ```
 
-**Exception handling:**
-- **HttpException** — passes through the original status code and message
-- **PrismaClientKnownRequestError** — mapped to HTTP status codes:
-  - `P2002` (unique constraint) → `409 Conflict` with message `"Resource already exists."`
-  - `P2025` (record not found) → `404 Not Found` with message `"Resource not found."`
-  - `P2003` (foreign key constraint) → `400 Bad Request` with message `"Invalid foreign key."`
-  - Other Prisma errors → `500 Internal Server Error` with message `"Internal server error"`
-- **All other exceptions** → `500 Internal Server Error` with message `"Internal server error"`
+**Production response format** (NODE_ENV=production):
+```json
+{ "statusCode": 500, "message": "Internal server error" }
+```
 
-**Production behavior** (`NODE_ENV=production`):
-- Response body: `{ statusCode, message }` only — NO stack trace, NO timestamp, NO path
-- Internal server errors always return generic `"Internal server error"` message
+**Development response format** (NODE_ENV=development):
+```json
+{ "statusCode": 500, "message": "Internal server error", "timestamp": "2024-01-15T10:30:00.000Z", "path": "/api/wallets", "stack": "Error: ..." }
+```
 
-**Development behavior** (any other `NODE_ENV`):
-- Response body includes `timestamp`, `path`, and `stack` fields for debugging
-
-**Source:** `apps/api-service/src/common/filters/all-exceptions.filter.ts`
-
-### Prisma Error Handling
-All repository methods wrap Prisma calls with `try/catch` using the shared `handlePrismaError()` utility at `apps/api-service/src/common/prisma-error.handler.ts`:
+**Prisma error mapping** (applied both globally and per-method via `handlePrismaError()`):
 
 | Prisma Error | HTTP Status | Message |
 |---|---|---|
 | `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
 | `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
 | `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"`
+| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` |
+
+**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
 
 ### Rate Limiting
 Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
 
-| Scope | Limit | TTL | Exemptions |
-|-------|-------|-----|------------|
-| Global (all endpoints) | 100 requests | 60 seconds | — |
-| Auth endpoints | 10 requests | 60 seconds | — |
-| Health endpoint | Unlimited | — | Exempt via `@SkipThrottle()` |
-
-Rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
+- **Global:** 100 requests per 60 seconds per IP
+- **Auth endpoints:** 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
+- **Health endpoint:** exempt from rate limiting (`@SkipThrottle()`)
+- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
 
 ### Secret Redaction
-All log calls use NestJS `Logger` (not `console.log`). The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
+All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
 
-## Environment Variables
+### Validation
+All DTOs use `class-validator` with `whitelist: true` (strips unknown properties) and `transform: true` (coerces types like string → number for query params). The validation pipe is registered globally in `main.ts`.
 
-See [docs/self-hosting.md](docs/self-hosting.md) for the full reference of all environment variables.
+### WebSocket Gateway
+The WebSocket gateway at `apps/api-service/src/ws/ws.gateway.ts` provides real-time updates:
 
-## License
+- **Namespace:** `/ws`
+- **Authentication:** JWT token sent as `auth.token` in the connection handshake
+- **Events emitted:**
+  - `wallet:updated` — wallet balance change notification
+  - `alert:triggered` — alert rule triggered notification
+- **Auto-reconnect:** The frontend Socket.io client reconnects automatically with exponential backoff
 
-MIT
+## Deployment
+
+See [docs/self-hosting.md](docs/self-hosting.md) for production deployment instructions.
