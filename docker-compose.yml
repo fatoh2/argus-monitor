@@ -140,7 +140,8 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       HELIUS_API_KEY: ${HELIUS_API_KEY:-}
       HELIUS_RPC_URL: ${HELIUS_RPC_URL:-}
-      DATABASE_URL: ${SOLANA_ADAPTER_DATABASE_URL:-postgresql://argus:argus@postgres:5432/argus}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
     ports:
       - "${SOLANA_ADAPTER_PORT:-3002}:3002"
     depends_on:
@@ -209,7 +210,8 @@ services:
     build:
       context: .
       dockerfile: apps/notification-service/Dockerfile
-    container_name: argus-notification-service
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
     env_file: .env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
@@ -217,6 +219,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
     ports:
       - "${NOTIFICATION_SERVICE_PORT:-3004}:3004"
     depends_on:
@@ -234,6 +238,8 @@ services:
           "--spider",
           "http://localhost:3004/health",
         ]
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME:-60s}
       interval: 10s
       timeout: 5s
       retries: 3
