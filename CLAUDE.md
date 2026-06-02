@@ -19,6 +19,7 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 apps/
   frontend/                 React app
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
+    src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
   chain-indexer-service/    BullMQ job scheduler
   solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
     src/adapter/            SolanaAdapter (ChainAdapter impl)
@@ -258,7 +259,7 @@ model RevokedToken {
 
 ## Non-Negotiable Rules
 - **NEVER** push directly to `main` or `develop` — always open a PR
-- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) enforces this policy.
+- **NEVER** log secrets, tokens, or PII. Use the `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) to mask sensitive data before logging. A linting test (`log-secrets-lint.spec.ts`) scans all source files for log calls referencing secret env vars and enforces this policy.
 - **NEVER** commit `.env` files or API keys
 - **NEVER** mock the database in integration tests — use Testcontainers (PostgreSQL + Redis)
 - **NEVER** make direct HTTP calls between services — always BullMQ

@@ -33,6 +33,57 @@ This architecture provides a strong defense against common web vulnerabilities:
 - **Token theft:** Short-lived access tokens limit exposure; refresh tokens can be revoked server-side
 - **Replay attacks:** Each refresh token has a unique `jti` — revocation prevents replay
 
+
+## Secret Redaction
+
+Argus Monitor enforces a strict **no secrets in logs** policy to prevent accidental exposure of credentials, tokens, or PII through application logs.
+
+### Redaction Utility (`redact.ts`)
+
+The `redact()` utility at `apps/api-service/src/common/logger/redact.ts` provides reusable functions for masking sensitive data:
+
+| Function | Purpose |
+|----------|---------|
+| `redact(obj)` | Recursively masks sensitive fields (passwords, tokens, API keys, PII, wallet private keys, mnemonics) in any object. Returns a new object — does not mutate the original. |
+| `redactUrl(url)` | Strips API keys and tokens from URL query parameters |
+| `safeStringify(obj)` | JSON.stringify with automatic redaction of sensitive fields |
+| `containsEnvSecretRef(str)` | Detects `process.env.*KEY*` references in strings |
+
+**Sensitive fields detected** (case-insensitive matching):
+- Authentication: `password`, `passwd`, `secret`, `token`, `accesstoken`, `refreshtoken`, `jwt`, `jti`, `apikey`, `api_key`, `privatekey`, `secretkey`
+- PII: `email`, `phone`, `ssn`, `creditcard`, `cvv`
+- Blockchain: `mnemonic`, `seedphrase`, `walletprivatekey`, `passwordhash`
+
+### Where Redaction Is Applied
+
+1. **Global Exception Filter** — When logging 5xx errors, the `AllExceptionsFilter` now redacts `request.body` and `request.query` before writing to the log. This prevents secrets sent in request payloads from appearing in error logs.
+
+2. **Solana Consumer** — Wallet addresses in logs are partially redacted (first 4 + last 4 characters preserved) for traceability without exposing full addresses.
+
+3. **All Service Bootstrap Logs** — All six services now use NestJS `Logger` (structured, level-aware) instead of `console.log`, ensuring consistent log formatting and level filtering.
+
+### Automated Enforcement
+
+A lint-style test (`apps/api-service/src/common/__tests__/log-secrets-lint.spec.ts`) scans all `.ts` and `.tsx` source files for log calls that reference secret environment variables. It detects patterns like:
+
+```typescript
+// These will FAIL the lint test:
+logger.log(process.env.API_KEY)
+console.log(process.env.SECRET_TOKEN)
+
+// Use the redact() helper instead:
+logger.log(redact({ apiKey: process.env.API_KEY }))
+```
+
+The test checks for env var names matching: `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PRIVATE`, `MNEMONIC`, `SEED`. If a violation is found, the test fails with the exact file path and line number.
+
+### Best Practices
+
+- Always use `redact()` before logging objects that may contain user input or configuration values
+- Use `safeStringify()` instead of `JSON.stringify()` when serializing objects for logs
+- Use `redactUrl()` when logging URLs that may contain query parameters with API keys
+- Never use `console.log()` — always use NestJS `Logger` for structured, level-aware logging
+
 ## Additional Security Measures
 
 ### HTTP Security Headers

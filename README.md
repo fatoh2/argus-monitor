@@ -12,8 +12,9 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Solana Blockchain Adapter** — Helius RPC integration with rate limiter & circuit breaker
 - **Strict Input Validation** — all endpoints validate input with whitelist (unknown props rejected) + type coercion (string to number for query params)
 - **Health Checks** — `/api/health` endpoint for all services
-- **Global Exception Filter** — no stack traces in production responses; Prisma errors mapped to proper HTTP status codes (409 Conflict, 404 Not Found); all 5xx errors logged with request context
+- **Global Exception Filter** — no stack traces in production responses; Prisma errors mapped to proper HTTP status codes (409 Conflict, 404 Not Found); all 5xx errors logged with redacted request context (body and query params masked via `redact()`)
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt
+- **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 
 ## Architecture
 
@@ -119,6 +120,34 @@ The API service uses `@nestjs/throttler` v6.5.0 to protect all public endpoints 
 When the limit is exceeded, the API returns **HTTP 429 Too Many Requests** with a `Retry-After` header indicating when the client can retry.
 
 **Note:** The throttler uses in-memory storage by default. If you scale to multiple API service instances, configure a Redis store for shared rate limit tracking.
+
+## Secret Redaction
+
+Argus Monitor enforces a strict **no secrets in logs** policy across all services:
+
+- **`redact()` utility** (`apps/api-service/src/common/logger/redact.ts`) — recursively masks sensitive fields from objects before logging. Detects and redacts:
+  - Authentication secrets: passwords, tokens, JWT, API keys, private keys
+  - PII: email, phone, SSN, credit card numbers
+  - Blockchain secrets: mnemonics, seed phrases, wallet private keys
+  - Case-insensitive field matching (e.g., `apiKey`, `API_KEY`, `apikey` all match)
+- **`redactUrl(url)`** — strips API keys and tokens from URL query parameters
+- **`safeStringify(obj)`** — JSON.stringify with automatic redaction
+- **`containsEnvSecretRef(str)`** — detects `process.env.*KEY*` references in strings
+
+### Where Redaction Is Applied
+
+| Location | What's Redacted |
+|----------|----------------|
+| `AllExceptionsFilter` (5xx error logs) | Request body and query params before logging |
+| `SolanaConsumer` (wallet address logs) | Wallet addresses (first 4 + last 4 chars preserved) |
+| All `main.ts` bootstrap logs | Replaced `console.log` with NestJS `Logger` (structured, level-aware) |
+
+### Enforcement
+
+A lint-style test (`apps/api-service/src/common/__tests__/log-secrets-lint.spec.ts`) scans all `.ts` and `.tsx` source files for log calls referencing secret environment variables (matching patterns: KEY, SECRET, TOKEN, PASSWORD, PRIVATE, MNEMONIC, SEED). If a violation is found, the test fails with the file path and line number.
+
+**Source:** `apps/api-service/src/common/logger/redact.ts`
+
 
 ## Solana Adapter Service
 
