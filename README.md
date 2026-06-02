@@ -4,7 +4,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 
 ## Features
 
-- **JWT Authentication** — register, login, refresh tokens, profile endpoint
+- **JWT Authentication** — register, login, refresh tokens, logout, profile endpoint. Short-lived access tokens (15 min) with httpOnly refresh token cookies (7 days) for secure session management.
 - **Wallet Management** — add, list, view, and delete blockchain wallet addresses
 - **Alert Rules** — create, list, view, and delete alert rules per wallet
 - **Real-time WebSocket Gateway** — authenticated connections, wallet updates, alert triggers
@@ -73,7 +73,38 @@ All blockchain adapters implement the `ChainAdapter` interface from `@argus/shar
 - **Wallet** — blockchain address + chain type, owned by user
 - **AlertRule** — rule configuration per wallet (type, threshold, chain)
 - **Chain** — supported blockchain networks (name, RPC URL)
+- **RevokedToken** — tracks revoked refresh tokens by JWT ID (`jti`) for secure logout
 
+## JWT Authentication
+
+The API service uses a dual-token JWT authentication system:
+
+- **Access Token** — short-lived (15 minutes), sent via `Authorization: Bearer` header. Used for authenticating API requests.
+- **Refresh Token** — long-lived (7 days), stored as an httpOnly cookie (`refresh_token`). Used to obtain new access tokens without re-authentication.
+
+### Cookie Configuration
+
+| Attribute | Value | Purpose |
+|-----------|-------|---------|
+| `httpOnly` | `true` | Not accessible via JavaScript (XSS protection) |
+| `secure` | `true` in production | HTTPS only |
+| `sameSite` | `strict` | CSRF protection |
+| `path` | `/api/auth` | Scoped to auth endpoints |
+| `maxAge` | 7 days | Matches refresh token TTL |
+
+### Auth Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/auth/register` | Public | Register with email + password. Returns `{accessToken, user}`, sets refresh cookie |
+| `POST` | `/api/auth/login` | Public | Login. Returns `{accessToken, user}`, sets refresh cookie |
+| `POST` | `/api/auth/refresh` | Cookie | Reads refresh token from cookie, returns new `{accessToken, user}`, rotates refresh cookie |
+| `POST` | `/api/auth/logout` | Cookie | Revokes refresh token server-side, clears cookie |
+| `POST` | `/api/auth/me` | Bearer JWT | Returns current user profile |
+
+### Refresh Token Revocation
+
+When a user logs out, the refresh token's JWT ID (`jti`) is stored in the `RevokedToken` table. Any subsequent attempt to use a revoked refresh token is rejected with `401 Unauthorized`. This ensures that even if a refresh token is compromised, it can be invalidated server-side.
 
 ## Rate Limiting
 
@@ -114,211 +145,58 @@ Token bucket algorithm protecting Helius RPC from excessive requests:
 | Base delay | `RATE_LIMITER_BASE_DELAY_MS` | 1000 | Initial backoff delay (ms) |
 | Max delay | `RATE_LIMITER_MAX_DELAY_MS` | 30000 | Maximum backoff delay (ms) |
 
-- Exponential backoff with jitter (±25%) on retries
-- Does NOT retry on 4xx errors (except 429 rate limit)
-
 ### Circuit Breaker
 
-Three-state circuit breaker with exponential backoff retry and caching, preventing cascading RPC failures:
+Three-state circuit breaker (`CLOSED → OPEN → HALF_OPEN`) that prevents cascading failures when Helius RPC is degraded:
 
 | Config | Env Var | Default | Description |
 |--------|---------|---------|-------------|
-| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open circuit |
-| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Successes in half-open to close |
-| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Time before half-open retry (ms) |
-| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts before failing |
+| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open |
+| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Consecutive successes to close |
+| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Wait before half-open (ms) |
+| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts when circuit is closed |
 | Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
 | Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
 
-States: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
+### Caching
 
-**Retry behavior:**
-- Exponential backoff: attempt 1 = 500ms, attempt 2 = 1000ms, attempt 3 = 2000ms
-- ±25% jitter added to each delay to avoid thundering herd
-- Errors are logged with sanitized endpoint URL (API key stripped), error code, and attempt number
+In-memory cache with TTL to reduce redundant RPC calls:
 
-**Caching:**
-- Successful RPC responses are cached in-memory, keyed by operation type
-- Cache keys: `balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`
-- When the circuit is OPEN, cached last-known values are returned instead of throwing
-- Cache is cleared on circuit reset
-
-**Degraded events:**
-- When the circuit opens, an `RpcDegradedEvent` is emitted via an RxJS `Subject` (`degraded$`)
-- The `SolanaAdapter` subscribes to these events in `onModuleInit` and logs warnings
-- Event payload: `{endpoint, errorCode, errorMessage, circuitState, failureCount, timestamp}`
-
-### BullMQ Consumer
-
-Processes `solana:fetch` queue jobs from the chain-indexer service:
-
-- **`balance`** — fetches native SOL balance
-- **`transaction`** — fetches recent transactions
-- **`token_account`** — fetches SPL token balances
-- Unknown monitor types are skipped gracefully
-
-Returns normalized data with stringified BIGINT values for JSON serialization.
-
-## API Endpoints
-
-All endpoints are prefixed with `/api`. All request bodies and query parameters are strictly validated — unknown properties are rejected with a 400 BadRequest, and types are automatically coerced (e.g. string query params like `page=2` become numbers).
-
-### Auth (public)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/auth/register` | Register with email + password |
-| `POST` | `/api/auth/login` | Login, returns JWT access + refresh tokens |
-| `POST` | `/api/auth/refresh` | Refresh access token |
-| `POST` | `/api/auth/me` | Get current user profile (JWT protected) |
-
-### Wallets (JWT required)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/wallets` | Add a wallet (address + chain) |
-| `GET` | `/api/wallets` | List user's wallets |
-| `GET` | `/api/wallets/:id` | Get single wallet |
-| `DELETE` | `/api/wallets/:id` | Delete wallet |
-
-### Alert Rules (JWT required)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/alert-rules` | Create rule (walletId, chain, type, threshold) |
-| `GET` | `/api/alert-rules` | List user's rules |
-| `GET` | `/api/alert-rules/:id` | Get single rule |
-| `DELETE` | `/api/alert-rules/:id` | Delete rule |
-
-### Chains (admin)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/chains` | Create chain (name, RPC URL) |
-| `GET` | `/api/chains` | List all chains |
-| `GET` | `/api/chains/:id` | Get single chain |
-| `DELETE` | `/api/chains/:id` | Delete chain |
-
-### Health
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/health` | Service health check |
-
-## WebSocket Gateway
-
-Connect to `/ws` namespace with JWT token in `auth.token` or `query.token`.
-
-**Client → Server events:**
-- `subscribe-wallet` — subscribe to real-time updates for a wallet
-- `unsubscribe-wallet` — unsubscribe from wallet updates
-
-**Server → Client events:**
-- `wallet_update` — emitted to wallet subscribers when data changes
-- `alert_triggered` — emitted to user room when an alert fires
-- `connected` — emitted on successful connection with user ID
+| Config | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| Cache TTL | `CACHE_TTL_MS` | 30000 | Cache duration (ms) |
+| Max entries | `CACHE_MAX_ENTRIES` | 1000 | Max cached items |
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js (v18 or higher)
-- npm or yarn
-- Docker and Docker Compose (for local development with PostgreSQL and Redis)
-- A **Helius API key** (free tier at [helius.xyz](https://helius.xyz)) for Solana features
+- Node.js 20+
+- Docker & Docker Compose
+- A Helius API key (free tier)
 
-### Quick Start
+### Local Development
 
 ```bash
-# Clone the repository
+# Clone the repo
 git clone https://github.com/fatoh2/argus-monitor.git
 cd argus-monitor
 
-# Copy environment variables
+# Copy environment file
 cp .env.example .env
-# Edit .env and set HELIUS_API_KEY
+# Edit .env with your Helius API key and JWT secret
 
-# Start dependencies (PostgreSQL + Redis)
+# Start dependencies (PostgreSQL, Redis)
 docker compose up -d postgres redis
 
 # Install dependencies
 npm install
 
 # Run database migrations
-cd apps/api-service && npx prisma migrate deploy && cd ../..
+npx prisma migrate deploy
 
 # Start the API service
-cd apps/api-service && npm run start:dev
+npm run start:dev api-service
 ```
 
-### Testing the API
-
-```bash
-# Register a user
-curl -X POST http://localhost:3000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password123"}'
-
-# Login
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password123"}'
-
-# Use the returned accessToken for protected endpoints
-curl http://localhost:3000/api/wallets \
-  -H "Authorization: Bearer <token>"
-```
-
-### Self-Hosting
-
-For production deployment instructions, see the [Self-Hosting Guide](./docs/self-hosting.md).
-
-## Development
-
-### Running All Services
-
-```bash
-docker compose up -d
-```
-
-### Running Tests
-
-```bash
-# All tests
-npm test
-
-# API service tests only
-cd apps/api-service && npm test
-
-# Solana adapter tests only
-cd apps/solana-adapter-service && npm test
-```
-
-### Project Structure
-
-```
-argus-monitor/
-├── apps/
-│   ├── api-service/              # NestJS — auth, wallets, alert rules, WebSocket
-│   ├── chain-indexer-service/    # BullMQ job scheduler
-│   ├── solana-adapter-service/   # Helius RPC integration
-│   │   ├── src/adapter/          # SolanaAdapter (ChainAdapter impl)
-│   │   ├── src/rate-limiter/     # Token bucket rate limiter
-│   │   ├── src/circuit-breaker/  # Three-state circuit breaker
-│   │   ├── src/consumer/         # BullMQ solana:fetch consumer
-│   │   └── src/config/           # Helius, Redis, rate limiter config
-│   ├── alert-service/            # Alert rule evaluation engine
-│   ├── notification-service/     # Telegram bot notifications
-│   └── rpc-monitor-service/      # RPC health checks
-├── packages/
-│   ├── chain-adapter-sdk/        # Published as @argus/adapter-sdk
-│   └── shared-types/             # Enums, queue names, job payload types, ChainAdapter interface
-├── docker-compose.yml            # Local dev — all services + PostgreSQL + Redis
-├── .env.example                  # Environment variable reference
-├── nest-cli.json                 # NestJS monorepo config
-└── package.json                  # Workspace root
-```
-
-## License
-
-This project is [MIT licensed](LICENSE).
+See [docs/self-hosting.md](docs/self-hosting.md) for production deployment instructions.

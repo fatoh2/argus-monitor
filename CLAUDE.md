@@ -41,11 +41,23 @@ docker-compose.prod.yml     Self-hosted production
 
 The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` prefix.
 
-### Auth (public)
-- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds)
-- `POST /api/auth/login` — login, returns `{accessToken, refreshToken, user}`
-- `POST /api/auth/refresh` — refresh access token with `{refreshToken}`
-- `POST /api/auth/me` — get current user profile (JWT protected)
+### Auth (public, except /me)
+- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds). Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/login` — login. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
+- `POST /api/auth/refresh` — reads refresh token from `refresh_token` httpOnly cookie, verifies it, returns new `{accessToken, user}`, rotates refresh cookie
+- `POST /api/auth/logout` — revokes refresh token server-side (stores `jti` in `RevokedToken` table), clears `refresh_token` cookie
+- `POST /api/auth/me` — get current user profile (JWT protected, `JwtAuthGuard`)
+
+**Token TTLs:**
+- Access token: 15 minutes (hardcoded `15m`)
+- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation support
+
+**Cookie config for refresh_token:**
+- `httpOnly: true` — not accessible via JavaScript
+- `secure: true` in production (HTTPS only)
+- `sameSite: 'strict'` — CSRF protection
+- `path: '/api/auth'` — scoped to auth endpoints
+- `maxAge: 7 days`
 
 ### Wallets (JWT required, JwtAuthGuard)
 - `POST /api/wallets` — add wallet `{address, chain: "SOLANA"|"ETHEREUM"}`
@@ -121,125 +133,92 @@ This means all DTOs are enforced at runtime. Sending extra fields, missing requi
 The `solana-adapter-service` (port 3002) provides Helius RPC integration.
 
 ### SolanaAdapter (`src/adapter/solana.adapter.ts`)
-Implements `ChainAdapter` interface from `@argus/shared-types`:
-- `getNativeBalance(address)` — SOL balance in lamports (BIGINT)
-- `getTokenBalances(address)` — SPL token balances, skips zero-balance tokens
-- `getRecentTransactions(address, limit=20)` — normalized transactions
-- `checkRpcHealth(endpoint)` — latency + block height
-- Uses `@solana/web3.js` Connection with `confirmed` commitment
-- All RPC calls wrapped in rate limiter + circuit breaker
-- Implements `OnModuleInit` — subscribes to `circuitBreaker.degraded$` events on startup
-- Passes `rpcUrl` and `cacheKey` to `circuitBreaker.execute()` for caching and endpoint logging
-- Cache keys: `balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`
+Implements `ChainAdapter` interface for Solana:
+
+- `getNativeBalance(address)` — returns SOL balance in lamports (BIGINT)
+- `getTokenBalances(address)` — returns SPL token balances, skips zero-balance tokens
+- `getRecentTransactions(address, limit=20)` — returns last N transactions normalized to `Transaction` interface
+- `checkRpcHealth(endpoint)` — latency + block height health check
+- Transaction normalization: parses system program transfers (SOL) and token program transfers (SPL)
 
 ### Rate Limiter (`src/rate-limiter/rate-limiter.service.ts`)
-- Token bucket algorithm
-- Configurable: `maxRequestsPerSecond`, `maxRetries`, `baseDelayMs`, `maxDelayMs`
-- Exponential backoff with jitter (±25%)
-- Does NOT retry on 4xx errors (except 429)
+Token bucket algorithm protecting Helius RPC from excessive requests:
+
+| Config | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| Max RPS | `RATE_LIMITER_MAX_RPS` | 10 | Max requests per second |
+| Max retries | `RATE_LIMITER_MAX_RETRIES` | 3 | Retry attempts on rate limit |
+| Base delay | `RATE_LIMITER_BASE_DELAY_MS` | 1000 | Initial backoff delay (ms) |
+| Max delay | `RATE_LIMITER_MAX_DELAY_MS` | 30000 | Maximum backoff delay (ms) |
 
 ### Circuit Breaker (`src/circuit-breaker/circuit-breaker.service.ts`)
-- Three states: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
-- Configurable: `failureThreshold`, `successThreshold`, `timeoutMs`, `maxRetries`, `baseDelayMs`, `maxDelayMs`
-- **Retry**: exponential backoff (baseDelayMs × 2^(attempt-1)) with ±25% jitter, up to `maxRetries` attempts
-- **Caching**: in-memory `Map<string, CachedValue>` — caches successful results keyed by operation
-- **Degraded events**: RxJS `Subject<RpcDegradedEvent>` exposed as `degraded$` observable
-- When circuit is OPEN and a cached value exists, returns cached value instead of throwing
-- Endpoint URLs are sanitized (API key stripped) before logging
-- Methods: `execute<T>(fn, endpoint?, cacheKey?)`, `reset()`, `clearCache()`, `getCachedValue<T>(key)`, `hasCachedValue(key)`
+Three-state circuit breaker (`CLOSED → OPEN → HALF_OPEN`) that prevents cascading failures when Helius RPC is degraded:
 
-### BullMQ Consumer (`src/consumer/solana.consumer.ts`)
-- Processes `solana:fetch` queue jobs
-- Monitor types: `balance`, `transaction`, `token_account`
-- Returns stringified BIGINT values for JSON serialization
-- Unknown monitor types skipped with warning
+| Config | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open |
+| Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Consecutive successes to close |
+| Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Wait before half-open (ms) |
+| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts when circuit is closed |
+| Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
+| Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
 
-### Configuration (`src/config/configuration.ts`)
-```typescript
-{
-  port: 3002,
-  helius: { apiKey, rpcUrl },
-  redis: { host, port },
-  rateLimiter: { maxRequestsPerSecond, maxRetries, baseDelayMs, maxDelayMs },
-  circuitBreaker: {
-    failureThreshold,    // CIRCUIT_BREAKER_FAILURE_THRESHOLD (default: 5)
-    successThreshold,    // CIRCUIT_BREAKER_SUCCESS_THRESHOLD (default: 3)
-    timeoutMs,           // CIRCUIT_BREAKER_TIMEOUT_MS (default: 30000)
-    maxRetries,          // CIRCUIT_BREAKER_MAX_RETRIES (default: 3)
-    baseDelayMs,         // CIRCUIT_BREAKER_BASE_DELAY_MS (default: 500)
-    maxDelayMs,          // CIRCUIT_BREAKER_MAX_DELAY_MS (default: 2000)
-  },
-}
-```
+### Consumer (`src/consumer/solana.consumer.ts`)
+BullMQ consumer for the `solana:fetch` queue. Processes jobs from the chain-indexer:
 
-## ChainAdapter Interface (`packages/shared-types/src/lib/shared-types.ts`)
+- **Job payload**: `{walletId, address, monitorType}`
+- **Flow**: Fetch data via SolanaAdapter → write to DB → push `alert:evaluation` job
+- **Error handling**: Failed jobs go to dead-letter queue after max retries
 
-```typescript
-interface ChainAdapter {
-  getNativeBalance(address: string): Promise<NativeBalance>;
-  getTokenBalances(address: string): Promise<TokenBalance[]>;
-  getRecentTransactions(address: string, limit?: number): Promise<Transaction[]>;
-  checkRpcHealth(endpoint: string): Promise<RpcHealthResult>;
-  getChainType(): string;
-}
-```
+### Caching
+In-memory cache with TTL to reduce redundant RPC calls:
 
-**Data types:**
-- `NativeBalance` — `{address, balance: bigint, decimals, symbol}`
-- `TokenBalance` — `{mint, symbol, name, amount: bigint, decimals, usdValue: number|null}`
-- `Transaction` — `{signature, slot, timestamp, from, to, amount: bigint, fee: bigint, status, type, raw?}`
-- `RpcHealthResult` — `{endpoint, healthy, latencyMs, blockHeight, error?}`
+| Config | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| Cache TTL | `CACHE_TTL_MS` | 30000 | Cache duration (ms) |
+| Max entries | `CACHE_MAX_ENTRIES` | 1000 | Max cached items |
 
-## BullMQ Queues (`packages/shared-types/src/queues/index.ts`)
+## Prisma Schema
 
-| Queue Name | Payload Type | Producer | Consumer |
-|------------|-------------|----------|----------|
-| `chain:indexer` | `{walletId, chainType, address}` | API service | Chain indexer |
-| `solana:fetch` | `{walletId, address, monitorType}` | Chain indexer | Solana adapter |
-| `alert:evaluation` | `{walletId, alertRuleId, currentValue: bigint, threshold: bigint, condition}` | Solana adapter | Alert service |
-| `notification:dispatch` | `{alertId, walletId, channel, message}` | Alert service | Notification service |
-| `rpc:health-check` | `{rpcUrl, chainType}` | RPC monitor | RPC monitor |
-
-## Enums (`packages/shared-types/src/enums/index.ts`)
-
-- `ChainType` — `SOLANA`, `EVM`
-- `MonitorType` — `BALANCE`, `TRANSACTION`, `TOKEN_ACCOUNT`, `PROGRAM`, `GAS_PRICE`
-- `AlertCondition` — `GT`, `GTE`, `LT`, `LTE`, `EQ`, `NEQ`, `CHANGED`
-- `AlertStatus` — `ACTIVE`, `TRIGGERED`, `RESOLVED`, `DISABLED`
-- `NotificationChannel` — `TELEGRAM`, `EMAIL`, `WEBHOOK`
-- `JobStatus` — `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `RETRYING`
-- `RpcStatus` — `HEALTHY`, `DEGRADED`, `DOWN`, `CIRCUIT_OPEN`
-
-## Prisma Schema (api-service)
+### Models
 
 ```prisma
 model User {
   id           String      @id @default(uuid())
   email        String      @unique
   passwordHash String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   wallets      Wallet[]
   alertRules   AlertRule[]
 }
 
 model Wallet {
-  id         String      @id @default(uuid())
-  address    String      @unique
-  userId     String
-  chain      String      // "SOLANA" or "ETHEREUM"
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String      @id @default(uuid())
+  address   String
+  chain     String
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   alertRules AlertRule[]
+
+  @@unique([address, chain, userId])
   @@index([userId])
 }
 
 model AlertRule {
   id        String   @id @default(uuid())
-  userId    String
-  walletId  String
   chain     String
   type      String
   threshold String?
+  userId    String
+  walletId  String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([walletId])
 }
@@ -248,6 +227,16 @@ model Chain {
   id     String @id @default(uuid())
   name   String @unique
   rpcUrl String
+}
+
+model RevokedToken {
+  id        String   @id @default(uuid())
+  tokenJti  String   @unique // JWT ID (jti) — unique per token
+  expiresAt DateTime // When the token naturally expires; we can clean up after this
+  createdAt DateTime @default(now())
+
+  @@index([tokenJti])
+  @@index([expiresAt])
 }
 ```
 
@@ -281,10 +270,14 @@ model Chain {
 
 ## Auth (MVP)
 Auth is inside `api-service` using NestJS Guards + JWT + Passport.
-- JWT strategy: `passport-jwt` with Bearer token extraction
+- JWT strategy: `passport-jwt` with Bearer token extraction (access token)
+- Refresh token: httpOnly cookie (`refresh_token`) with `jti` for revocation
 - Global `JwtAuthGuard` applied per-controller
 - Passwords: bcrypt with 12 salt rounds
-- Access token: configurable expiry (default 1h), refresh token: 7d
+- Access token: 15 minutes (hardcoded `15m`)
+- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation
+- Revoked tokens stored in `RevokedToken` table (by `jti`)
+- Cookie parser middleware registered in `main.ts`
 - Do NOT create a separate auth-service until explicitly instructed.
 
 ## PR Format
@@ -315,3 +308,4 @@ All env vars are documented in `.env.example` at the repo root. Key vars:
 | `REDIS_HOST` | all | No | localhost |
 | `REDIS_PORT` | all | No | 6379 |
 | `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
+| `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
