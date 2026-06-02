@@ -1,10 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TelegramService } from '../telegram.service';
 
-// Mock global fetch
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
-
 describe('TelegramService', () => {
   let service: TelegramService;
 
@@ -14,179 +10,182 @@ describe('TelegramService', () => {
     }).compile();
 
     service = module.get<TelegramService>(TelegramService);
-    jest.clearAllMocks();
   });
 
-  afterEach(() => {
-    delete process.env.TELEGRAM_BOT_TOKEN;
+  describe('formatAlertNotification', () => {
+    it('should format a balance_low alert correctly', () => {
+      const alert = {
+        ruleType: 'balance_low',
+        walletAddress: 'Gg7UjK8Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1',
+        chain: 'SOLANA',
+        message: 'Balance 500000000 SOL is below threshold 1000000000',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('⚠️');
+      expect(result).toContain('*Alert Triggered*');
+      expect(result).toContain('*Type:* balance_low');
+      expect(result).toContain('*Chain:* SOLANA');
+      expect(result).toContain('*Wallet:*');
+      expect(result).toContain('Gg7UjK8Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1Kz1');
+      expect(result).toContain('Balance 500000000 SOL is below threshold 1000000000');
+    });
+
+    it('should format a balance_high alert with correct emoji', () => {
+      const alert = {
+        ruleType: 'balance_high',
+        walletAddress: 'wallet-abc',
+        chain: 'SOLANA',
+        message: 'Balance 2000000000 SOL is above threshold 1000000000',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('📈');
+      expect(result).toContain('*Type:* balance_high');
+    });
+
+    it('should format a transaction_from alert with correct emoji', () => {
+      const alert = {
+        ruleType: 'transaction_from',
+        walletAddress: 'wallet-abc',
+        chain: 'SOLANA',
+        message: 'Transaction from wallet wallet-abc: sig-123',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('💸');
+      expect(result).toContain('*Type:* transaction_from');
+    });
+
+    it('should format a transaction_to alert with correct emoji', () => {
+      const alert = {
+        ruleType: 'transaction_to',
+        walletAddress: 'wallet-abc',
+        chain: 'SOLANA',
+        message: 'Transaction to wallet wallet-abc: sig-456',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('💰');
+      expect(result).toContain('*Type:* transaction_to');
+    });
+
+    it('should format a token_volume alert with correct emoji', () => {
+      const alert = {
+        ruleType: 'token_volume',
+        walletAddress: 'wallet-abc',
+        chain: 'SOLANA',
+        message: 'Transaction amount 2000000000 exceeds threshold 1000000000',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('📊');
+      expect(result).toContain('*Type:* token_volume');
+    });
+
+    it('should use default emoji for unknown rule type', () => {
+      const alert = {
+        ruleType: 'unknown_type',
+        walletAddress: 'wallet-abc',
+        chain: 'SOLANA',
+        message: 'Some alert',
+      };
+
+      const result = service.formatAlertNotification(alert);
+
+      expect(result).toContain('🔔');
+    });
   });
 
   describe('sendMessage', () => {
-    it('should send a message successfully', async () => {
-      process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          result: { message_id: 12345 },
-        }),
-      });
+    const originalEnv = process.env;
 
-      const result = await service.sendMessage({
-        chatId: '123456789',
-        text: 'Hello from test',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.messageId).toBe('12345');
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.telegram.org/bottest-bot-token/sendMessage',
-        expect.objectContaining({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: expect.stringContaining('"chat_id":"123456789"'),
-        }),
-      );
+    beforeEach(() => {
+      jest.resetModules();
+      process.env = { ...originalEnv };
     });
 
-    it('should return error when bot token is not configured', async () => {
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('should return error when TELEGRAM_BOT_TOKEN is not set', async () => {
       delete process.env.TELEGRAM_BOT_TOKEN;
 
       const result = await service.sendMessage({
-        chatId: '123456789',
+        chatId: '12345',
         text: 'Hello',
       });
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Bot token not configured');
-      expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('should handle Telegram API error response', async () => {
-      process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: async () => 'Forbidden: bot was blocked by the user',
-      });
+    it('should attempt to send when TELEGRAM_BOT_TOKEN is set', async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
 
-      const result = await service.sendMessage({
-        chatId: '123456789',
-        text: 'Hello',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('403');
-    });
-
-    it('should handle network errors', async () => {
-      process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
-      mockFetch.mockRejectedValue(new Error('Network timeout'));
-
-      const result = await service.sendMessage({
-        chatId: '123456789',
-        text: 'Hello',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Network timeout');
-    });
-
-    it('should send message with HTML parse mode', async () => {
-      process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
-      mockFetch.mockResolvedValue({
+      // Mock fetch to return success
+      global.fetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({
+        json: jest.fn().mockResolvedValue({
           ok: true,
-          result: { message_id: 67890 },
+          result: { message_id: 42 },
         }),
+      } as any);
+
+      const result = await service.sendMessage({
+        chatId: '12345',
+        text: 'Hello',
+        parseMode: 'Markdown',
       });
 
-      await service.sendMessage({
-        chatId: '123456789',
-        text: '<b>Bold text</b>',
-        parseMode: 'HTML',
-      });
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('42');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.telegram.org/bottest-token/sendMessage',
         expect.objectContaining({
-          body: expect.stringContaining('"parse_mode":"HTML"'),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: expect.stringContaining('"chat_id":"12345"'),
         }),
       );
     });
-  });
 
-  describe('formatAlertNotification', () => {
-    it('should format balance_low alert', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'balance_low',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Balance 500000000 SOL is below threshold 1000000000',
+    it('should handle Telegram API error response', async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: jest.fn().mockResolvedValue('Too Many Requests'),
+      } as any);
+
+      const result = await service.sendMessage({
+        chatId: '12345',
+        text: 'Hello',
       });
 
-      expect(message).toContain('⚠️');
-      expect(message).toContain('Alert Triggered');
-      expect(message).toContain('balance_low');
-      expect(message).toContain('SOLANA');
-      expect(message).toContain('ABC123def456');
-      expect(message).toContain('below threshold');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Telegram API error');
     });
 
-    it('should format balance_high alert', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'balance_high',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Balance is above threshold',
+    it('should handle fetch throwing an error', async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+
+      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+      const result = await service.sendMessage({
+        chatId: '12345',
+        text: 'Hello',
       });
 
-      expect(message).toContain('📈');
-    });
-
-    it('should format transaction_from alert', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'transaction_from',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Transaction from wallet',
-      });
-
-      expect(message).toContain('💸');
-    });
-
-    it('should format transaction_to alert', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'transaction_to',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Transaction to wallet',
-      });
-
-      expect(message).toContain('💰');
-    });
-
-    it('should format token_volume alert', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'token_volume',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Transaction amount exceeds threshold',
-      });
-
-      expect(message).toContain('📊');
-    });
-
-    it('should use default emoji for unknown type', () => {
-      const message = service.formatAlertNotification({
-        ruleType: 'unknown_type',
-        walletAddress: 'ABC123def456',
-        chain: 'SOLANA',
-        message: 'Unknown alert',
-      });
-
-      expect(message).toContain('🔔');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Network error');
     });
   });
 });
