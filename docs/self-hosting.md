@@ -97,6 +97,9 @@ RATE_LIMITER_MAX_DELAY_MS=30000
 CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
 CIRCUIT_BREAKER_SUCCESS_THRESHOLD=3
 CIRCUIT_BREAKER_TIMEOUT_MS=30000
+CIRCUIT_BREAKER_MAX_RETRIES=3
+CIRCUIT_BREAKER_BASE_DELAY_MS=500
+CIRCUIT_BREAKER_MAX_DELAY_MS=2000
 
 # ---- Alert Service (port 3003) ----
 ALERT_SERVICE_PORT=3003
@@ -128,6 +131,7 @@ REDIS_PORT=6379
 - Set `TELEGRAM_BOT_TOKEN` if using Telegram notifications
 - The `DATABASE_URL` uses service names (`postgres`, `redis`) when running with Docker Compose
 - Rate limiter and circuit breaker settings are optional — defaults are safe for most deployments
+- Circuit breaker retry and caching settings are also optional — defaults provide 3 retries with 500ms/1s/2s backoff
 
 ### 3. Start the Stack
 
@@ -210,6 +214,9 @@ The `solana-adapter-service` provides Helius RPC integration with built-in resil
 - Opens after `CIRCUIT_BREAKER_FAILURE_THRESHOLD` consecutive failures
 - Half-opens after `CIRCUIT_BREAKER_TIMEOUT_MS` to test recovery
 - Closes after `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` consecutive successes in half-open state
+- **Retry**: exponential backoff (500ms/1s/2s) with ±25% jitter, up to `CIRCUIT_BREAKER_MAX_RETRIES` attempts
+- **Caching**: last-known successful values cached in-memory; returned when circuit is OPEN
+- **Degraded events**: RxJS Subject emits `RpcDegradedEvent` when circuit opens (logged by adapter)
 
 ### BullMQ Consumer
 - Processes `solana:fetch` queue jobs

@@ -96,6 +96,9 @@ Implements `ChainAdapter` interface from `@argus/shared-types`:
 - `checkRpcHealth(endpoint)` — latency + block height
 - Uses `@solana/web3.js` Connection with `confirmed` commitment
 - All RPC calls wrapped in rate limiter + circuit breaker
+- Implements `OnModuleInit` — subscribes to `circuitBreaker.degraded$` events on startup
+- Passes `rpcUrl` and `cacheKey` to `circuitBreaker.execute()` for caching and endpoint logging
+- Cache keys: `balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`
 
 ### Rate Limiter (`src/rate-limiter/rate-limiter.service.ts`)
 - Token bucket algorithm
@@ -105,8 +108,13 @@ Implements `ChainAdapter` interface from `@argus/shared-types`:
 
 ### Circuit Breaker (`src/circuit-breaker/circuit-breaker.service.ts`)
 - Three states: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
-- Configurable: `failureThreshold`, `successThreshold`, `timeoutMs`
-- Throws `Error("Circuit breaker is OPEN...")` when short-circuiting
+- Configurable: `failureThreshold`, `successThreshold`, `timeoutMs`, `maxRetries`, `baseDelayMs`, `maxDelayMs`
+- **Retry**: exponential backoff (baseDelayMs × 2^(attempt-1)) with ±25% jitter, up to `maxRetries` attempts
+- **Caching**: in-memory `Map<string, CachedValue>` — caches successful results keyed by operation
+- **Degraded events**: RxJS `Subject<RpcDegradedEvent>` exposed as `degraded$` observable
+- When circuit is OPEN and a cached value exists, returns cached value instead of throwing
+- Endpoint URLs are sanitized (API key stripped) before logging
+- Methods: `execute<T>(fn, endpoint?, cacheKey?)`, `reset()`, `clearCache()`, `getCachedValue<T>(key)`, `hasCachedValue(key)`
 
 ### BullMQ Consumer (`src/consumer/solana.consumer.ts`)
 - Processes `solana:fetch` queue jobs
@@ -121,7 +129,14 @@ Implements `ChainAdapter` interface from `@argus/shared-types`:
   helius: { apiKey, rpcUrl },
   redis: { host, port },
   rateLimiter: { maxRequestsPerSecond, maxRetries, baseDelayMs, maxDelayMs },
-  circuitBreaker: { failureThreshold, successThreshold, timeoutMs },
+  circuitBreaker: {
+    failureThreshold,    // CIRCUIT_BREAKER_FAILURE_THRESHOLD (default: 5)
+    successThreshold,    // CIRCUIT_BREAKER_SUCCESS_THRESHOLD (default: 3)
+    timeoutMs,           // CIRCUIT_BREAKER_TIMEOUT_MS (default: 30000)
+    maxRetries,          // CIRCUIT_BREAKER_MAX_RETRIES (default: 3)
+    baseDelayMs,         // CIRCUIT_BREAKER_BASE_DELAY_MS (default: 500)
+    maxDelayMs,          // CIRCUIT_BREAKER_MAX_DELAY_MS (default: 2000)
+  },
 }
 ```
 

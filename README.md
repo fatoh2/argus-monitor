@@ -102,15 +102,34 @@ Token bucket algorithm protecting Helius RPC from excessive requests:
 
 ### Circuit Breaker
 
-Three-state circuit breaker preventing cascading RPC failures:
+Three-state circuit breaker with exponential backoff retry and caching, preventing cascading RPC failures:
 
 | Config | Env Var | Default | Description |
 |--------|---------|---------|-------------|
 | Failure threshold | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Consecutive failures to open circuit |
 | Success threshold | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | 3 | Successes in half-open to close |
 | Timeout | `CIRCUIT_BREAKER_TIMEOUT_MS` | 30000 | Time before half-open retry (ms) |
+| Max retries | `CIRCUIT_BREAKER_MAX_RETRIES` | 3 | Retry attempts before failing |
+| Base delay | `CIRCUIT_BREAKER_BASE_DELAY_MS` | 500 | Initial backoff delay (ms) |
+| Max delay | `CIRCUIT_BREAKER_MAX_DELAY_MS` | 2000 | Maximum backoff delay (ms) |
 
 States: `CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`
+
+**Retry behavior:**
+- Exponential backoff: attempt 1 = 500ms, attempt 2 = 1000ms, attempt 3 = 2000ms
+- ±25% jitter added to each delay to avoid thundering herd
+- Errors are logged with sanitized endpoint URL (API key stripped), error code, and attempt number
+
+**Caching:**
+- Successful RPC responses are cached in-memory, keyed by operation type
+- Cache keys: `balance:{address}`, `tokens:{address}`, `tx:{address}:{limit}`
+- When the circuit is OPEN, cached last-known values are returned instead of throwing
+- Cache is cleared on circuit reset
+
+**Degraded events:**
+- When the circuit opens, an `RpcDegradedEvent` is emitted via an RxJS `Subject` (`degraded$`)
+- The `SolanaAdapter` subscribes to these events in `onModuleInit` and logs warnings
+- Event payload: `{endpoint, errorCode, errorMessage, circuitState, failureCount, timestamp}`
 
 ### BullMQ Consumer
 
