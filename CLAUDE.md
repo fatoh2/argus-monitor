@@ -43,8 +43,12 @@ apps/
   alert-service/            Alert rule evaluation engine
   notification-service/     Telegram bot notifications
 packages/
-  chain-adapter-sdk/        Published as @argus/adapter-sdk on npm
-  shared-types/             Enums, queue names, job payload types, ChainAdapter interface
+  adapter-sdk/              Published as @argus/adapter-sdk on npm
+    src/                    ChainAdapter interface, types, SolanaAdapter impl
+    src/__tests__/          ChainAdapter interface contract tests
+    src/solana/             SolanaAdapter (Helius RPC via @solana/web3.js)
+    src/solana/__tests__/   SolanaAdapter unit tests (14 tests)
+  shared-types/             Enums, queue names, job payload types
 k8s/apps/                   Helm charts for all services
 .github/workflows/
   test.yml                  Backend CI — PostgreSQL + Redis on every PR
@@ -59,7 +63,7 @@ Makefile                    Dev commands (up, down, migrate, seed, test, check, 
 
 ### Running Backend Tests
 ```bash
-npm test              # all unit tests (235 tests, 42 suites)
+npm test              # all unit tests (271 tests, 45 suites)
 npm run test:cov      # with coverage (70% threshold)
 npm run test:e2e      # E2E tests (requires PostgreSQL)
 make test             # via Docker
@@ -81,10 +85,11 @@ VITE_E2E_TEST=true npx playwright test
 
 ### Test Coverage by Service
 - **api-service** (15 files): AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, E2E REST endpoints
-- **solana-adapter-service** (6 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events)
+- **solana-adapter-service** (9 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events), AppController, AppService, HealthController
 - **alert-service** (3 files): AlertEngineService (all rule types)
 - **notification-service** (5 files): TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling)
 - **chain-indexer-service** (3 files): AppController, AppService, HealthController
+- **adapter-sdk** (2 files): ChainAdapter interface contract tests, SolanaAdapter unit tests (14 tests)
 - **frontend** (4 E2E spec files): Auth flow, wallet management, alert rules CRUD, WebSocket connectivity
 
 ### CI Pipelines

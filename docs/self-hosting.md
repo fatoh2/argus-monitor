@@ -35,7 +35,7 @@ The dashboard (`/dashboard`) renders the `WalletDashboard` component which provi
 
 ## Architecture Overview
 
-Argus Monitor consists of a React frontend, six NestJS microservices, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching. The frontend communicates with the API service via HTTP (REST) and WebSocket (Socket.io) for real-time live updates on wallet balances and transactions.
+Argus Monitor consists of a React frontend, six NestJS microservices, a shared `@argus/adapter-sdk` package, a PostgreSQL database, and a Redis instance for BullMQ job queues and caching. The frontend communicates with the API service via HTTP (REST) and WebSocket (Socket.io) for real-time live updates on wallet balances and transactions. The `@argus/adapter-sdk` package provides a unified ChainAdapter interface implemented by the solana-adapter-service.
 
 ```
 ┌──────────────────┐
@@ -98,7 +98,7 @@ Argus Monitor consists of a React frontend, six NestJS microservices, a PostgreS
 
 ## Testing
 
-Argus Monitor includes a comprehensive test suite with **232 unit and integration tests** across all 5 microservices, plus **Playwright E2E tests** for the frontend.
+Argus Monitor includes a comprehensive test suite with **271 unit and integration tests** across all 6 microservices, plus **Playwright E2E tests** for the frontend.
 
 ### Running Backend Tests Locally
 
