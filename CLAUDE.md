@@ -19,6 +19,7 @@ with a NestJS backend, React frontend, and BullMQ-based job pipeline.
 apps/
   frontend/                 React app
   api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
+    prisma/seed.ts          Database seed — test user, wallets, alert rules, chain
     src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
     src/common/prisma-error.handler.ts  Shared Prisma error handler — maps P2002→409, P2025→404, P2003→400
     src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests (rate limiting via supertest)
@@ -273,6 +274,7 @@ model RevokedToken {
   - EVM: wei (1 ETH = 1_000_000_000_000_000_000 wei)
   - Store `asset_decimals` separately for display
 - **NEVER** run `prisma migrate deploy` on production — migrations run in CI only
+- **Seed data** (`apps/api-service/prisma/seed.ts`) creates test user `test@argusmonitor.io` / `testpassword123`, 3 Solana devnet wallets, and 2 alert rules. Run with `cd apps/api-service && npx prisma db seed`. Clears existing data first — safe for local dev only.
 - **ALWAYS** validate Solana addresses with `new PublicKey(address)` before storing
 - **ALWAYS** store `wallet_balance_snapshots` (time-series) not a single balance row
   - Index: `(wallet_id, captured_at DESC)` for chart queries
@@ -337,3 +339,23 @@ All env vars are documented in `.env.example` at the repo root. Key vars:
 | `REDIS_PORT` | all | No | 6379 |
 | `TELEGRAM_BOT_TOKEN` | notification-service | No | — |
 | `ALLOWED_ORIGINS` | api-service | No | `*` (dev) / none (prod) |
+
+## Database Seeding
+
+A seed script at `apps/api-service/prisma/seed.ts` populates the database with test data for local development:
+
+- **Test user:** `test@argusmonitor.io` / `testpassword123` (bcrypt-hashed, JWT-compatible)
+- **Test wallets:** 3 Solana devnet addresses (no real funds)
+- **Alert rules:** `large_tx` (threshold: 1 SOL / 1_000_000_000 lamports) and `balance_change` (any change)
+- **Chain entry:** Solana devnet (`https://api.devnet.solana.com`)
+
+The seed is wired into `apps/api-service/package.json` via `"prisma": { "seed": "ts-node prisma/seed.ts" }`.
+
+**Usage:**
+```bash
+cd apps/api-service
+npx prisma db seed
+```
+
+The seed clears all existing data before inserting (safe for local dev only).
+

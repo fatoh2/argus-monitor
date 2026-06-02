@@ -16,6 +16,7 @@ Argus Monitor is a blockchain monitoring SaaS application. It allows users to se
 - **Rate Limiting** — global 100 req/60s per IP, stricter 10 req/60s on auth endpoints, health endpoint exempt. Auth rate limiting validated via supertest integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
 - **Secret Redaction** — all log calls use NestJS `Logger` (not `console.log`); a `redact()` utility masks passwords, tokens, API keys, and PII before logging; a linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls
 - **Prisma Error Handling** — all repository methods wrap Prisma calls with `try/catch` using a shared `handlePrismaError()` utility that maps `P2002` (unique constraint) → 409, `P2025` (not found) → 404, `P2003` (foreign key) → 400, and unexpected errors → 500
+- **Database Seeding** — `apps/api-service/prisma/seed.ts` creates a test user (`test@argusmonitor.io`), 3 Solana devnet wallets, 2 alert rules, and a Solana chain entry. Wired via `package.json` `prisma.seed` config — run with `npx prisma db seed` from `apps/api-service/`.
 
 ## Architecture
 
@@ -246,8 +247,26 @@ npm install
 # Run database migrations
 npx prisma migrate deploy
 
+# Seed the database with test data
+cd apps/api-service && npx prisma db seed && cd ../..
+
 # Start the API service
 npm run start:dev api-service
 ```
+
+The seed is wired into `apps/api-service/package.json` via `"prisma": { "seed": "ts-node prisma/seed.ts" }`, so `npx prisma db seed` works automatically after `npm install`.
+
+The seed command creates test data for local development:
+
+| Item | Details |
+|------|---------|
+| **Test user** | `test@argusmonitor.io` / `testpassword123` |
+| **Test wallets** | 3 Solana devnet addresses (no real funds) |
+| **Alert rules** | `large_tx` (threshold: 1 SOL) on wallet 0, `balance_change` on wallet 1 |
+| **Chain entry** | Solana devnet (`https://api.devnet.solana.com`) |
+
+Login with `test@argusmonitor.io` / `testpassword123` to explore the API immediately.
+
+**Source:** `apps/api-service/prisma/seed.ts`
 
 See [docs/self-hosting.md](docs/self-hosting.md) for production deployment instructions.
