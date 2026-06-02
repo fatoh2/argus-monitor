@@ -147,6 +147,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	@echo ""
 	@echo "🚀 Step 4/7: Starting all services..."
 	@docker compose up -d
+	@sleep 3
 	@echo ""
 	@echo "🔍 Step 5/7: Waiting for all service health checks..."
 	@for service in \
@@ -198,3 +199,7 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@echo "=========================================="
 	@echo "  ✅ PASS — All checks (incl. e2e) passed!"
 	@echo "=========================================="
+	@echo ""
+	@echo "🧹 Cleaning up..."
+	@docker compose down -v 2>/dev/null || true
+	@echo "  ✅ cleanup complete"
