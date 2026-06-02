@@ -106,7 +106,7 @@ Argus Monitor consists of a React frontend, six NestJS microservices, a shared `
 
 ## Testing
 
-Argus Monitor includes a comprehensive test suite with **271 unit and integration tests** across all 6 microservices, plus **Playwright E2E tests** for the frontend.
+Argus Monitor includes a comprehensive test suite with **273 unit and integration tests** across all 6 microservices, plus **Playwright E2E tests** for the frontend.
 
 ### Running Backend Tests Locally
 
