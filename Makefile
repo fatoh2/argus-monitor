@@ -38,8 +38,8 @@ migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
-check: ## TypeScript type-check (api-service)
-	npx tsc --noEmit --project apps/api-service/tsconfig.json
+check: ## TypeScript type-check (api-service) — runs inside Docker for consistency
+	docker compose run --rm api-service npx tsc --noEmit --project apps/api-service/tsconfig.json
 
 test: ## Run all workspace tests
 	npm test --workspaces
@@ -57,19 +57,30 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), 
 	docker compose down -v
 	docker compose up -d postgres redis
 	@echo "Waiting for postgres to be healthy..."
+	@sleep 3
 	@for i in $$(seq 1 30); do \
-		if docker compose exec postgres pg_isready -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus} >/dev/null 2>&1; then \
+		if docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus} >/dev/null 2>&1; then \
 			echo "Postgres is healthy!"; \
 			break; \
+		fi; \
+		if [ "$$i" = "30" ]; then \
+			echo "ERROR: Postgres failed to become healthy after 30 attempts."; \
+			docker compose logs postgres --tail 20; \
+			exit 1; \
 		fi; \
 		echo "Waiting... ($$i/30)"; \
 		sleep 2; \
 	done
 	@echo "Waiting for redis to be healthy..."
 	@for i in $$(seq 1 30); do \
-		if docker compose exec redis redis-cli ping >/dev/null 2>&1; then \
+		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
 			echo "Redis is healthy!"; \
 			break; \
+		fi; \
+		if [ "$$i" = "30" ]; then \
+			echo "ERROR: Redis failed to become healthy after 30 attempts."; \
+			docker compose logs redis --tail 20; \
+			exit 1; \
 		fi; \
 		echo "Waiting... ($$i/30)"; \
 		sleep 2; \
