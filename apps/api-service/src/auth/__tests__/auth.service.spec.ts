@@ -38,6 +38,7 @@ describe('AuthService', () => {
           provide: JwtService,
           useValue: {
             sign: jest.fn().mockReturnValue('mock-token'),
+            verify: jest.fn().mockReturnValue({ sub: 'user-1', email: 'test@example.com' }),
           },
         },
       ],
@@ -111,21 +112,30 @@ describe('AuthService', () => {
   });
 
   describe('refreshToken', () => {
-    it('should return new tokens for valid user', async () => {
+    it('should return new tokens for valid refresh token', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
-      const result = await service.refreshToken('user-1');
+      const result = await service.refreshToken('valid-refresh-token');
 
+      expect(jwtService.verify).toHaveBeenCalledWith('valid-refresh-token');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'user-1' } });
       expect(jwtService.sign).toHaveBeenCalledTimes(2);
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
     });
 
+    it('should throw UnauthorizedException if refresh token is invalid', async () => {
+      (jwtService.verify as jest.Mock).mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(service.refreshToken('expired-token')).rejects.toThrow(UnauthorizedException);
+    });
+
     it('should throw UnauthorizedException if user not found', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.refreshToken('nonexistent-id')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('valid-token-no-user')).rejects.toThrow(UnauthorizedException);
     });
   });
 });

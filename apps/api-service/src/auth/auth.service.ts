@@ -6,6 +6,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 const SALT_ROUNDS = 12;
+const ACCESS_TOKEN_TTL = '15m';
+const REFRESH_TOKEN_TTL = '7d';
 
 @Injectable()
 export class AuthService {
@@ -45,24 +47,28 @@ export class AuthService {
     return this.generateTokens(user.id, user.email);
   }
 
-  async refreshToken(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new UnauthorizedException('User not found');
+  async refreshToken(refreshToken: string) {
+    try {
+      const payload = this.jwtService.verify(refreshToken);
+      const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+      return this.generateTokens(user.id, user.email);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
-
-    return this.generateTokens(user.id, user.email);
   }
 
   private generateTokens(userId: string, email: string) {
     const payload = { sub: userId, email };
 
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: process.env.JWT_EXPIRATION_TIME || '1h',
+      expiresIn: ACCESS_TOKEN_TTL,
     });
 
     const refreshToken = this.jwtService.sign(payload, {
-      expiresIn: '7d',
+      expiresIn: REFRESH_TOKEN_TTL,
     });
 
     return {
