@@ -7,12 +7,12 @@
 #   make migrate     — run prisma migrations (development)
 #   make migrate-prod — run prisma migrations (production-style deploy)
 #   make seed        — seed the database
-#   make check       — TypeScript type-check across all apps
+#   make check       — TypeScript type-check (api-service)
 #   make test        — run all workspace tests
 #   make logs        — tail all container logs
-#   make psql        — open psql shell in postgres
-#   make redis-cli   — open redis-cli in redis
-#   make reset       — full reset: down -v, up infra, migrate, seed, up all
+#   make psql        — open psql shell in postgres (requires running containers)
+#   make redis-cli   — open redis-cli in redis (requires running containers)
+#   make reset       — full reset: down -v, start infra, migrate, seed, start all
 # =============================================================================
 
 .DEFAULT_GOAL := help
@@ -38,7 +38,7 @@ migrate-prod: ## Run prisma migrations (production-style — uses migrate deploy
 seed: ## Seed the database
 	docker compose run --rm api-service npx prisma db seed
 
-check: ## TypeScript type-check across all apps
+check: ## TypeScript type-check (api-service)
 	npx tsc --noEmit --project apps/api-service/tsconfig.json
 
 test: ## Run all workspace tests
@@ -47,13 +47,13 @@ test: ## Run all workspace tests
 logs: ## Tail all container logs
 	docker compose logs -f
 
-psql: ## Open psql shell in postgres container
+psql: ## Open psql shell in postgres (requires running containers)
 	docker compose exec postgres psql -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus}
 
-redis-cli: ## Open redis-cli in redis container
+redis-cli: ## Open redis-cli in redis (requires running containers)
 	docker compose exec redis redis-cli
 
-reset: ## Full reset: down -v, start infra, wait for healthy, migrate, seed, start all
+reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), seed, start all
 	docker compose down -v
 	docker compose up -d postgres redis
 	@echo "Waiting for postgres to be healthy..."
@@ -74,7 +74,7 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate, seed, sta
 		echo "Waiting... ($$i/30)"; \
 		sleep 2; \
 	done
-	docker compose run --rm api-service npx prisma migrate dev
+	docker compose run --rm api-service npx prisma migrate deploy
 	docker compose run --rm api-service npx prisma db seed
 	docker compose up -d
 	@echo "✅ Stack is up and seeded!"
