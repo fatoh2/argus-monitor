@@ -130,12 +130,15 @@ Argus Monitor consists of a React frontend, six NestJS microservices, a shared `
 ```bash
 git clone https://github.com/fatoh2/argus-monitor.git
 cd argus-monitor
-cp .env.example .env
+cp .env.production.example .env
 # Edit .env with production values:
 #   - Generate strong JWT_SECRET: openssl rand -base64 32
 #   - Set strong POSTGRES_PASSWORD
 #   - Add your HELIUS_API_KEY
-#   - Add your TELEGRAM_BOT_TOKEN (optional)
+#   - Add your TELEGRAM_BOT_TOKEN
+#   - Add your TELEGRAM_CHAT_ID
+#   - Set ALLOWED_ORIGINS to your domain
+#   - Configure RPC_MONITOR_ENDPOINTS if monitoring custom RPC nodes
 ```
 
 ### 2. Start the Stack

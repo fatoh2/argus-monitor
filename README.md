@@ -311,11 +311,13 @@ Runs on PRs touching `apps/frontend/`:
 
 ```bash
 # Development
-bash scripts/setup.sh   # one-command setup
+bash scripts/setup.sh   # one-command setup (creates .env from .env.example)
 make up                  # start all services
 make test-local          # validate the stack
 
 # Production
+cp .env.production.example .env   # create production env file
+# Edit .env with your secrets, then:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -325,6 +327,8 @@ Helm charts are available in `k8s/apps/` for each service. See the [self-hosting
 
 ## Environment Variables
 
+### Development
+
 Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
@@ -333,6 +337,17 @@ cp .env.example .env
 ```
 
 See `.env.example` for a complete list of all variables with documentation.
+
+### Production
+
+Copy `.env.production.example` to `.env` and fill in your values:
+
+```bash
+cp .env.production.example .env
+# Edit .env with production values (secrets, domains, etc.)
+```
+
+See `.env.production.example` for a complete list of all production variables with documentation.
 
 ## Contributing
 
