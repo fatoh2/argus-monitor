@@ -9,6 +9,7 @@ import { RateLimiterService } from './rate-limiter/rate-limiter.service';
 import { CircuitBreakerService } from './circuit-breaker/circuit-breaker.service';
 import { SolanaConsumer } from './consumer/solana.consumer';
 import { RpcMonitorService } from './rpc-monitor/rpc-monitor.service';
+import { RpcMonitorController } from './rpc-monitor/rpc-monitor.controller';
 import configuration from './config/configuration';
 import { QUEUES } from '@argus/shared-types';
 
@@ -33,7 +34,7 @@ import { QUEUES } from '@argus/shared-types';
     }),
     HealthModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, RpcMonitorController],
   providers: [
     AppService,
     SolanaAdapter,
