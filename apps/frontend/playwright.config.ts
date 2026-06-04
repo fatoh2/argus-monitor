@@ -27,11 +27,14 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Use vite from the root node_modules (npm workspace hoisting)
-    command: `VITE_E2E_TEST=true node ${resolve(rootDir, 'node_modules/.bin/vite')} --port 5173`,
+    // Use npx --no-install to resolve vite from local node_modules/.bin/
+    // without downloading from the registry. This works with npm workspace
+    // hoisting where vite is installed at the workspace root.
+    // cwd is set to the workspace root so npx can find vite in root node_modules/.bin/.
+    command: 'VITE_E2E_TEST=true npx --no-install vite --port 5173',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
-    cwd: __dirname,
+    cwd: rootDir,
     timeout: 30000,
   },
 });

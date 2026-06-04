@@ -225,9 +225,14 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 
 # ── E2E (Playwright) targets ──────────────────────────────────────────────────
 
+# Use npx --no-install playwright instead of directly invoking the CLI script.
+# npx resolves the hoisted @playwright/test package from the workspace root
+# and is more portable across environments than $(PWD)/node_modules/... paths.
+# The --no-install flag ensures npx doesn't download a missing package.
+
 e2e-setup: ## Install Playwright browsers (chromium) for E2E tests
 	@echo "📥 Installing Playwright Chromium browser..."
-	node $(PWD)/node_modules/@playwright/test/cli.js install chromium 2>&1
+	npx --no-install playwright install chromium 2>&1
 	@echo "  ✅ Playwright Chromium installed"
 
 e2e: ## Run Playwright E2E tests (requires stack running — make up)
@@ -240,7 +245,7 @@ e2e: ## Run Playwright E2E tests (requires stack running — make up)
 	@echo "  ✅ api-service is healthy"
 	@echo ""
 	@echo "🧪 Running Playwright E2E tests..."
-	@cd apps/frontend && node $(PWD)/node_modules/@playwright/test/cli.js test --reporter=line
+	cd apps/frontend && npx --no-install playwright test --reporter=line
 	@echo ""
 	@echo "=========================================="
 	@echo "  ✅ E2E tests passed!"
