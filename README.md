@@ -45,8 +45,10 @@ This checks prerequisites (Node.js >= 18, Docker running), installs npm dependen
 | `make migrate` | Run Prisma migrations (development — `migrate dev`) |
 | `make migrate-prod` | Run Prisma migrations (production-style — `migrate deploy`) |
 | `make seed` | Seed the database with test data |
-| `make check` | TypeScript type-check (api-service) |
+| `make check` | TypeScript type-check (all apps) — runs inside Docker for consistency |
 | `make test` | Run all workspace tests |
+| `make test-local` | Full stack smoke test: reset stack, migrate, seed, health checks, type-check, unit tests |
+| `make test-local-e2e` | Full stack smoke test + e2e tests (same as test-local, then runs e2e) |
 | `make logs` | Tail all container logs |
 | `make psql` | Open psql shell in postgres (requires running containers) |
 | `make redis-cli` | Open redis-cli in redis (requires running containers) |
@@ -60,6 +62,37 @@ bash scripts/setup.sh   # one-command setup (prerequisites, deps, .env, migratio
 make up                  # start all services
 make seed                # seed database
 make check               # verify TypeScript compiles
+make test-local          # full stack smoke test (health checks, type-check, unit tests)
+```
+
+### Full Stack Smoke Test
+
+The `test-local` target provides a complete end-to-end validation of the stack:
+
+1. **Reset stack** — `docker compose down -v` then starts `postgres` and `redis`
+2. **Wait for databases** — polls `pg_isready` and `redis-cli ping` (up to 60s each)
+3. **Migrations + seed** — `prisma migrate deploy` then `prisma db seed`
+4. **Start all services** — `docker compose up -d`
+5. **Health check polling** — polls all 5 services (api-service, chain-indexer, solana-adapter, alert-service, notification) on their health endpoints
+6. **Type check** — `make check` (tsc --noEmit)
+7. **Unit tests** — `make test`
+
+```bash
+make test-local          # 7-step smoke test
+make test-local-e2e      # same as test-local, then runs e2e tests
+```
+
+Expected output on success:
+```
+==========================================
+  ✅ PASS — All checks passed!
+==========================================
+```
+
+Expected output on failure (e.g., a service doesn't start):
+```
+  ❌ FAIL: solana-adapter did not become healthy after 60 seconds
+  <container logs tail>
 ```
 
 ### Full Reset
@@ -80,52 +113,17 @@ The frontend is a React 18 SPA built with Vite and Tailwind CSS, located at `app
 - **React 18** — UI library with functional components and hooks
 - **TypeScript** — strict mode
 - **Tailwind CSS** — utility-first CSS framework
-- **React Router DOM v6** — client-side routing
+- **React Router v6** — client-side routing with lazy-loaded routes
 - **Socket.io Client** — real-time WebSocket connection with auto-reconnect
-- **MSW (Mock Service Worker)** — API mocking for E2E tests
-
-### Components
-
-| Component | File | Description |
-|-----------|------|-------------|
-| WalletDashboard | `src/components/WalletDashboard.tsx` | Wallet list with add/remove, SOL balance (◎ lamports via BigInt), SPL token balances with USD values, recent transactions table, Socket.io live updates with animated notification banner |
+- **MSW (Mock Service Worker)** — API mocking for E2E tests (no backend needed in CI)
 
 ### Pages
 
-| Page | Route | Description |
-|------|-------|-------------|
-| Login | `/login` | Email/password login with form validation |
-| Register | `/register` | User registration with form validation |
-| Dashboard | `/dashboard` | Renders WalletDashboard — wallet management (add/delete), balances, transactions, Socket.io live updates |
+- **Login** (`/login`) — email/password authentication form with validation
+- **Register** (`/register`) — new user registration form
+- **Dashboard** (`/dashboard`) — wallet list, balances, transactions, and alert rules management
 
-### API Client Types
-
-The frontend API client at `src/services/api.ts` defines these types for the wallet dashboard:
-
-| Type | Fields | Description |
-|------|--------|-------------|
-| `TokenBalance` | `mint`, `symbol`, `amount` (string), `decimals`, `usdValue?` | SPL token balance — amount stored as string (lamports) to avoid float issues |
-| `WalletBalance` | `walletId`, `address`, `chain`, `solBalance` (string), `tokens` (TokenBalance[]), `updatedAt` | Wallet balance with SOL and SPL tokens |
-| `Transaction` | `id`, `walletId`, `signature`, `type` (send/receive/swap/other), `amount` (string), `symbol`, `fee`, `timestamp`, `status` (confirmed/pending/failed) | On-chain transaction record |
-
-### API Clients
-
-| Client | Methods | Endpoints |
-|--------|---------|-----------|
-| `balancesApi` | `findAll()`, `findByWalletId(id)` | `GET /api/balances`, `GET /api/wallets/:id/balances` |
-| `transactionsApi` | `findAll()`, `findByWalletId(id)` | `GET /api/transactions`, `GET /api/wallets/:id/transactions` |
-
-### Socket.io Events
-
-The frontend connects to the WebSocket gateway with JWT auth token and handles these events:
-
-| Event | Payload | Behavior |
-|-------|---------|----------|
-| `wallet_update` | `{ walletId, type }` | Shows notification banner, refetches all data |
-| `balance_update` | `{ walletId, solBalance }` | Shows notification banner, optimistically updates balance in state |
-| `new_transaction` | `Transaction` object | Shows notification banner with amount and symbol, prepends transaction to list |
-
-### Running the Frontend
+### Development
 
 ```bash
 cd apps/frontend
@@ -133,34 +131,11 @@ npm install
 npm run dev          # starts Vite dev server on port 5173
 ```
 
-The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL` env var). WebSocket URL is configurable via `VITE_WS_URL` — defaults to same host.
+The frontend expects the API service at `http://localhost:3000` (configurable via `VITE_API_URL`).
 
-### Building for Production
+### E2E Tests
 
-```bash
-cd apps/frontend
-npm run build        # outputs to apps/frontend/dist/
-```
-
-## Testing
-
-Argus Monitor has a comprehensive test suite with **273 tests across 53 suites** covering all 6 microservices, plus Playwright E2E tests for the frontend.
-
-### Running Backend Tests
-
-```bash
-npm test              # run all unit tests (273 tests, 53 suites)
-npm run test:cov      # run with coverage (70% threshold enforced)
-npm run test:e2e      # run E2E integration tests (requires PostgreSQL)
-```
-
-Tests can also be run via Docker for consistency:
-
-```bash
-make test             # runs `npm test` inside the api-service container
-```
-
-### Running Frontend E2E Tests
+Playwright E2E tests are located in `apps/frontend/e2e/`:
 
 ```bash
 cd apps/frontend
@@ -169,193 +144,218 @@ npx playwright install chromium
 VITE_E2E_TEST=true npx playwright test
 ```
 
-The E2E tests use MSW (Mock Service Worker) to mock all API responses — no backend or database needed. Tests cover:
+The E2E tests use MSW (Mock Service Worker) for API mocking — no backend required. Test coverage includes auth flow, wallet management, alert rules CRUD, wallet dashboard (balances, transactions), and WebSocket connectivity.
 
-- **Auth flow**: register, login, logout, invalid login, unauthenticated redirect
-- **Wallet flow**: add Solana/ETH wallet, view balances, delete wallet, empty state
-- **Alert rules**: create balance_low/high/transaction rules, verify in list, empty state
-- **WebSocket**: connection handling, graceful disconnection, live update events
+## Architecture
+
+```
+┌──────────────────┐
+│   Frontend       │
+│  (React SPA)     │
+│  Vite + Tailwind │
+│  Port 5173 (dev) │
+│  Port 80 (prod)  │
+└────────┬─────────┘
+         │ HTTP / WebSocket
+         ▼
+┌─────────────┐     ┌──────────────┐     ┌──────────────────┐
+│  API Service │────▶│  PostgreSQL  │     │  Redis (BullMQ)  │
+│  (port 3000) │     │  (port 5432) │     │  (port 6379)     │
+└──────┬───────┘     └──────────────┘     └──────────────────┘
+       │
+       │ BullMQ Queue
+       │
+       ├──────────────────────────────────┐
+       ▼                                  ▼
+┌────────────────┐              ┌──────────────────┐
+│ Chain Indexer  │              │ Solana Adapter   │
+│ (port 3001)    │              │ (port 3002)      │
+└────────────────┘              └──────────────────┘
+       │                                  │
+       └──────────────┬───────────────────┘
+                      ▼
+             ┌──────────────────┐
+             │ Alert Service    │
+             │ (port 3003)      │
+             └────────┬─────────┘
+                      │
+                      ▼
+             ┌──────────────────┐
+             │ Notification     │
+             │ Service          │
+             │ (port 3004)      │
+             └──────────────────┘
+```
+
+## Services
+
+### API Service (`apps/api-service/`)
+
+The central API gateway. Handles authentication, wallet management, alert rules, and WebSocket connections.
+
+- **Port:** 3000
+- **Auth:** JWT-based with access tokens (15m) and httpOnly refresh token cookies (7d)
+- **WebSocket:** Socket.io gateway for real-time wallet updates and alert triggers
+- **Database:** PostgreSQL via Prisma ORM
+- **Validation:** Global validation pipe with whitelist + type coercion
+- **Error Handling:** Global exception filter with Prisma error mapping
+- **Rate Limiting:** 100 req/60s global, 10 req/60s on auth endpoints
+
+### Chain Indexer Service (`apps/chain-indexer-service/`)
+
+BullMQ job scheduler that triggers periodic wallet balance and transaction fetching.
+
+- **Port:** 3001
+- **Queue:** BullMQ — schedules `solana:fetch` jobs for each tracked wallet
+
+### Solana Adapter Service (`apps/solana-adapter-service/`)
+
+Helius RPC integration with rate limiter, circuit breaker, and RPC health monitoring.
+
+- **Port:** 3002
+- **Rate Limiter:** Token bucket (configurable max RPS, retries, backoff)
+- **Circuit Breaker:** Three-state (closed/open/half-open) with configurable thresholds
+- **RPC Monitor:** Periodic health checks (latency, block height, status change events via RxJS)
+- **Consumer:** BullMQ `solana:fetch` job consumer
+
+### Alert Service (`apps/alert-service/`)
+
+Evaluates alert rules against fetched blockchain data.
+
+- **Port:** 3003
+- **Rule Types:** Balance thresholds, transaction patterns, custom conditions
+- **Queue:** BullMQ — consumes `alert:evaluate` jobs
+
+### Notification Service (`apps/notification-service/`)
+
+Dispatches triggered alerts via Telegram Bot API.
+
+- **Port:** 3004
+- **Channels:** Telegram (extensible for email, SMS, webhook)
+- **Retry:** Exponential backoff (5 attempts, 2s initial delay)
+- **Queue:** BullMQ — consumes `notification:send` jobs
+
+## Packages
+
+### `@argus/adapter-sdk` (`packages/adapter-sdk/`)
+
+Published npm package providing a unified `ChainAdapter` interface for blockchain interactions.
+
+- **Interface:** `getNativeBalance()`, `getTokenBalances()`, `getRecentTransactions()`, `checkRpcHealth()`
+- **Implementation:** `SolanaAdapter` using `@solana/web3.js` and Helius RPC
+- **Types:** All monetary amounts use `bigint` (never `number` or `float`)
+- **Tests:** Interface contract tests + SolanaAdapter unit tests (14 tests)
+
+### `@argus/shared-types` (`packages/shared-types/`)
+
+Shared TypeScript types, enums, and constants used across all services.
+
+- **Enums:** Queue names, job types, chain types
+- **Types:** Job payload interfaces, shared DTOs
+
+## Testing
+
+### Backend Tests
+
+```bash
+npm test              # all unit tests (273 tests, 53 suites)
+npm run test:cov      # with coverage (70% threshold)
+npm run test:e2e      # E2E tests (requires PostgreSQL)
+make test             # via Docker
+make test-local       # full stack smoke test (Docker, health checks, type-check, tests)
+make test-local-e2e   # full stack smoke test + e2e tests
+```
+
+### Frontend E2E Tests
+
+```bash
+cd apps/frontend
+npm install
+npx playwright install chromium
+VITE_E2E_TEST=true npx playwright test
+```
 
 ### Test Coverage by Service
 
-| Service | Test Files | What's Tested |
-|---------|-----------|---------------|
-| **api-service** | 25 test files | AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, AppModule, AuthController, WalletsController, AlertRulesController, E2E REST endpoints |
-| **solana-adapter-service** | 11 test files | SolanaAdapter (all methods with mocked Helius), SolanaConsumer (process, events), CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events), AppModule, AppController, AppService, HealthController, BigInt arithmetic |
-| **alert-service** | 6 test files | AlertEngineService (all rule types: balance_low, balance_high, transaction_from, transaction_to, token_volume), AppModule, AppController, AppService |
-| **notification-service** | 6 test files | TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling), AppModule |
-| **adapter-sdk** | 2 test files | ChainAdapter interface contract tests, SolanaAdapter unit tests (14 tests) |
-| **chain-indexer-service** | 5 test files | AppController, AppService, HealthController, AppModule, queue name validation |
+- **api-service** (25 files): AuthService, WalletsService, AlertRulesService, ChainsService, PrismaService, JwtStrategy, JwtAuthGuard, WebSocket gateway, exception filter, validation pipe, prisma error handler, redact utility, AppModule, AuthController, WalletsController, AlertRulesController, E2E REST endpoints
+- **solana-adapter-service** (11 files): SolanaAdapter (mocked Helius), SolanaConsumer, CircuitBreaker, RateLimiter, Config, RpcMonitorService (health checks, snapshots, status change events), AppModule, AppController, AppService, HealthController, BigInt arithmetic
+- **alert-service** (6 files): AlertEngineService (all rule types), AppModule, AppController, AppService
+- **notification-service** (6 files): TelegramService (send, format, error handling), NotificationConsumer (dispatch, retry, error handling), AppModule
+- **chain-indexer-service** (5 files): AppController, AppService, HealthController, AppModule, queue name validation
+- **adapter-sdk** (2 files): ChainAdapter interface contract tests, SolanaAdapter unit tests (14 tests)
+- **frontend** (4 E2E spec files): Auth flow, wallet management, alert rules CRUD, WebSocket connectivity
 
-### CI Pipelines
+## CI/CD
 
-Two GitHub Actions workflows run on every PR:
+### Backend CI (`.github/workflows/test.yml`)
 
-**Backend CI (`.github/workflows/test.yml`)** — runs on every PR to `develop` or `main`:
-1. Spins up PostgreSQL 16 and Redis 7 as service containers
-2. Installs dependencies (`npm ci`)
-3. Generates Prisma client and runs migrations
-4. Runs TypeScript check (`tsc --noEmit`)
-5. Runs lint check
-6. Runs all tests with coverage (70% threshold)
-7. Uploads coverage reports as artifacts
+Runs on every PR to `develop` or `main`:
+1. Spins up PostgreSQL 16 + Redis 7 service containers
+2. Installs deps, generates Prisma client, runs migrations
+3. TypeScript check (`tsc --noEmit`)
+4. Lint check
+5. Tests with coverage (70% threshold)
+6. Uploads coverage artifacts
 
-**Playwright E2E (`.github/workflows/playwright.yml`)** — runs on PRs touching `apps/frontend/`:
-1. Installs dependencies (`npm ci`)
-2. Installs Playwright Chromium browser
-3. Generates MSW service worker
-4. Runs Playwright tests with `VITE_E2E_TEST=true`
-5. Uploads Playwright report as artifact
+### Playwright E2E (`.github/workflows/playwright.yml`)
 
-### Test Infrastructure
-
-- **Root `jest.config.js`** — project references for all 5 apps with 70% global coverage threshold
-- **`apps/frontend/playwright.config.ts`** — Playwright config with Chromium, HTML reporter, and Vite dev server auto-start
-- **`apps/frontend/src/mocks/handlers.ts`** — MSW handlers for all API endpoints (auth, wallets, alert rules, balances, transactions, WebSocket)
-
-## Project Structure
-
-```
-apps/
-  frontend/                 React SPA (Vite + React 18 + Tailwind)
-    e2e/                    Playwright E2E tests
-    src/
-      components/           Shared UI components (Layout, WalletDashboard)
-      hooks/                Custom React hooks (useAuth)
-      mocks/                MSW handlers for E2E testing
-      pages/                Page components (Login, Register, Dashboard)
-      services/             API client and WebSocket service
-    jest.config.cjs         Jest config — excludes e2e dir from Jest
-  api-service/              NestJS — auth, wallets, alert rules, WebSocket gateway
-    src/common/logger/      Redaction utility (redact.ts) — masks secrets/PII in logs
-    src/common/prisma-error.handler.ts  Shared Prisma error handler
-    src/auth/__tests__/auth.controller.spec.ts  Auth controller integration tests
-    test/app.e2e-spec.ts    E2E integration tests (supertest) for all REST endpoints
-  chain-indexer-service/    BullMQ job scheduler
-  solana-adapter-service/   Helius RPC, rate limiter, circuit breaker
-  alert-service/            Alert rule evaluation engine
-  notification-service/     Telegram bot notifications
-packages/
-  adapter-sdk/             Published as @argus/adapter-sdk on npm
-  shared-types/             Enums, queue names, job payload types
-k8s/apps/                   Helm charts for all services
-.github/workflows/
-  test.yml                  Backend CI — PostgreSQL + Redis on every PR
-  playwright.yml            Frontend E2E — Playwright tests on frontend changes
-jest.config.js              Root Jest config with project references for all 5 apps
-docker-compose.yml          Local dev — all services + PostgreSQL + Redis (env_file pattern)
-docker-compose.prod.yml     Self-hosted production
-Makefile                    Dev commands (up, down, migrate, seed, test, check, reset)
-```
-
-## API Service Details
-
-The `api-service` (port 3000) is the primary HTTP API. All endpoints use `/api` prefix.
-
-### Auth (public, except /me)
-- `POST /api/auth/register` — register with email + password (bcrypt, 12 rounds). Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
-- `POST /api/auth/login` — login. Returns `{accessToken, user}`, sets `refresh_token` httpOnly cookie
-- `POST /api/auth/refresh` — reads refresh token from `refresh_token` httpOnly cookie, verifies it, returns new `{accessToken, user}`, rotates refresh cookie
-- `POST /api/auth/logout` — revokes refresh token server-side (stores `jti` in `RevokedToken` table), clears `refresh_token` cookie
-- `POST /api/auth/me` — get current user profile (JWT protected, `JwtAuthGuard`)
-
-**Token TTLs:**
-- Access token: 15 minutes (hardcoded `15m`)
-- Refresh token: 7 days (hardcoded `7d`), includes `jti` (UUID) for revocation support
-
-**Cookie config for refresh_token:**
-- `httpOnly: true` — not accessible via JavaScript
-- `secure: true` in production (HTTPS only)
-- `sameSite: 'strict'` — CSRF protection
-- `path: '/api/auth'` — scoped to auth endpoints
-- `maxAge: 7 days`
-
-### Wallets (JWT required, JwtAuthGuard)
-- `POST /api/wallets` — add wallet `{address, chain: "SOLANA"|"ETHEREUM"}`
-- `GET /api/wallets` — list user's wallets
-- `GET /api/wallets/:id` — get single wallet (UUID)
-- `DELETE /api/wallets/:id` — delete wallet
-
-### Balances (JWT required, JwtAuthGuard)
-- `GET /api/balances` — list balances for all user's wallets (includes SOL balance in lamports and SPL token balances)
-- `GET /api/wallets/:id/balances` — get balance for a specific wallet
-
-### Transactions (JWT required, JwtAuthGuard)
-- `GET /api/transactions` — list recent transactions for all user's wallets
-- `GET /api/wallets/:id/transactions` — get transactions for a specific wallet
-
-### Alert Rules (JWT required, JwtAuthGuard)
-- `POST /api/alert-rules` — create rule `{walletId, chain, type, threshold?}`
-- `GET /api/alert-rules` — list user's rules
-- `GET /api/alert-rules/:id` — get single rule (UUID)
-- `DELETE /api/alert-rules/:id` — delete rule
-
-**Alert rule types:** `balance_low`, `balance_high`, `transaction_from`, `transaction_to`
-
-### Chains (admin — no auth guard yet)
-- `POST /api/chains` — create chain `{name, rpcUrl}`
-- `GET /api/chains` — list all chains
-- `GET /api/chains/:id` — get single chain (UUID)
-- `DELETE /api/chains/:id` — delete chain
-
-### Global Exception Filter
-The api-service registers a global `AllExceptionsFilter` in `main.ts` that catches all unhandled exceptions. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost`:
-
-```typescript
-// main.ts
-const { httpAdapter } = app.get(HttpAdapterHost);
-app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
-```
-
-**Production response format** (NODE_ENV=production):
-```json
-{ "statusCode": 500, "message": "Internal server error" }
-```
-
-**Development response format** (NODE_ENV=development):
-```json
-{ "statusCode": 500, "message": "Internal server error", "timestamp": "2024-01-15T10:30:00.000Z", "path": "/api/wallets", "stack": "Error: ..." }
-```
-
-**Prisma error mapping** (applied both globally and per-method via `handlePrismaError()`):
-
-| Prisma Error | HTTP Status | Message |
-|---|---|---|
-| `P2002` (unique constraint) | `409 Conflict` | `"Resource already exists."` |
-| `P2025` (record not found) | `404 Not Found` | `"Resource not found."` |
-| `P2003` (foreign key) | `400 Bad Request` | `"Invalid foreign key."` |
-| Other Prisma errors | `500 Internal Server Error` | `"Internal server error"` |
-
-**Source:** `apps/api-service/src/common/prisma-error.handler.ts`
-
-### Rate Limiting
-Rate limiting is applied globally and per-endpoint using `@nestjs/throttler`:
-
-- **Global:** 100 requests per 60 seconds per IP
-- **Auth endpoints:** 10 requests per 60 seconds per IP (`@Throttle({ default: { limit: 10, ttl: 60000 } })`)
-- **Health endpoint:** exempt from rate limiting (`@SkipThrottle()`)
-- Rate limiting is validated via supertest integration test (`auth.controller.spec.ts`)
-
-### Secret Redaction
-All log calls use NestJS `Logger` (not `console.log`). A `redact()` utility at `apps/api-service/src/common/logger/redact.ts` masks passwords, tokens, API keys, and PII before logging. A linting test (`log-secrets-lint.spec.ts`) enforces no secret env vars in log calls.
-
-### Validation
-All DTOs use `class-validator` with `whitelist: true` (strips unknown properties) and `transform: true` (coerces types like string → number for query params). The validation pipe is registered globally in `main.ts`.
-
-### WebSocket Gateway
-The WebSocket gateway at `apps/api-service/src/ws/ws.gateway.ts` provides real-time updates:
-
-- **Namespace:** `/ws`
-- **Authentication:** JWT token sent as `auth.token` in the connection handshake
-- **Events emitted:**
-  - `wallet:updated` — wallet balance change notification
-  - `alert:triggered` — alert rule triggered notification
-- **Events received (frontend → backend):**
-  - `wallet_update` — wallet added/removed/updated
-  - `balance_update` — SOL or token balance changed
-  - `new_transaction` — new on-chain transaction detected
-- **Auto-reconnect:** The frontend Socket.io client reconnects automatically with exponential backoff
+Runs on PRs touching `apps/frontend/`:
+1. Installs dependencies
+2. Installs Playwright browsers
+3. Runs Playwright tests with MSW mocking (no backend needed)
+4. Uploads Playwright report on failure
 
 ## Deployment
 
-See [docs/self-hosting.md](docs/self-hosting.md) for production deployment instructions.
+### Docker Compose (Local / Self-Hosted)
+
+```bash
+# Development
+bash scripts/setup.sh   # one-command setup (creates .env from .env.example)
+make up                  # start all services
+make test-local          # validate the stack
+
+# Production
+cp .env.production.example .env   # create production env file
+# Edit .env with your secrets, then:
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Kubernetes (Production)
+
+Helm charts are available in `k8s/apps/` for each service. See the [self-hosting guide](docs/self-hosting.md) for detailed deployment instructions.
+
+## Environment Variables
+
+### Development
+
+Copy `.env.example` to `.env` and fill in your values:
+
+```bash
+cp .env.example .env
+# Edit .env with your HELIUS_API_KEY, JWT_SECRET, etc.
+```
+
+See `.env.example` for a complete list of all variables with documentation.
+
+### Production
+
+Copy `.env.production.example` to `.env` and fill in your values:
+
+```bash
+cp .env.production.example .env
+# Edit .env with production values (secrets, domains, etc.)
+```
+
+See `.env.production.example` for a complete list of all production variables with documentation.
+
+## Contributing
+
+1. Branch from `develop`: `git checkout -b feature/issue-{number}-{description} develop`
+2. Make changes and test locally: `make test-local`
+3. Open a PR to `develop`
+4. Ensure CI passes
+
+## License
+
+MIT
