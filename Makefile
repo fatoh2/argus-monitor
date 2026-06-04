@@ -15,6 +15,8 @@
 #   make reset       — full reset: down -v, start infra, migrate, seed, start all
 #   make test-local  — full stack smoke test (reset, health checks, type-check, tests)
 #   make test-local-e2e — full stack smoke test + e2e tests
+#   make e2e-setup   — install Playwright browsers (chromium) for E2E tests
+#   make e2e         — run Playwright E2E tests (requires stack running)
 # =============================================================================
 
 .DEFAULT_GOAL := help
@@ -26,7 +28,7 @@
 POSTGRES_USER ?= argus
 POSTGRES_DB   ?= argus
 
-.PHONY: help up down migrate migrate-prod seed check test logs psql redis-cli reset test-local test-local-e2e
+.PHONY: help up down migrate migrate-prod seed check test logs psql redis-cli reset test-local test-local-e2e e2e-setup e2e
 
 help: ## Show this help
 	@grep -E '^[-a-zA-Z_][-a-zA-Z0-9_]*:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -208,8 +210,8 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then runs e2e
 	@$(MAKE) test-local
 	@echo ""
-	@echo "🧪 Running e2e tests..."
-	@docker compose run --rm api-service npm run test:e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
+	@echo "🧪 Running Playwright E2E tests..."
+	@$(MAKE) e2e || { echo "  ❌ FAIL: e2e tests failed"; exit 1; }
 	@echo "  ✅ e2e tests passed"
 	@echo ""
 	@echo "=========================================="
@@ -219,3 +221,32 @@ test-local-e2e: ## Full stack smoke test + e2e tests: same as test-local, then r
 	@echo "🧹 Cleaning up..."
 	@docker compose down -v 2>/dev/null || true
 	@echo "  ✅ cleanup complete"
+
+
+# ── E2E (Playwright) targets ──────────────────────────────────────────────────
+
+# Use npx --no-install playwright instead of directly invoking the CLI script.
+# npx resolves the hoisted @playwright/test package from the workspace root
+# and is more portable across environments than $(PWD)/node_modules/... paths.
+# The --no-install flag ensures npx doesn't download a missing package.
+
+e2e-setup: ## Install Playwright browsers (chromium) for E2E tests
+	@echo "📥 Installing Playwright Chromium browser..."
+	npx --no-install playwright install chromium 2>&1
+	@echo "  ✅ Playwright Chromium installed"
+
+e2e: ## Run Playwright E2E tests (requires stack running — make up)
+	@echo "🔍 Checking that the stack is running..."
+	@if ! curl -sf http://localhost:3000/api/health >/dev/null 2>&1; then \
+		echo ""; \
+		echo "  ❌ ERROR: stack not running — run 'make up' first"; \
+		exit 1; \
+	fi
+	@echo "  ✅ api-service is healthy"
+	@echo ""
+	@echo "🧪 Running Playwright E2E tests..."
+	cd apps/frontend && npx --no-install playwright test --reporter=line
+	@echo ""
+	@echo "=========================================="
+	@echo "  ✅ E2E tests passed!"
+	@echo "=========================================="
