@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(__dirname, '../..');
 
 export default defineConfig({
   testDir: './e2e',
@@ -22,10 +27,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'VITE_E2E_TEST=true npx vite --port 5173',
+    // Use vite from the root node_modules (npm workspace hoisting)
+    command: `VITE_E2E_TEST=true node ${resolve(rootDir, 'node_modules/.bin/vite')} --port 5173`,
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
-    cwd: './',
+    cwd: __dirname,
     timeout: 30000,
   },
 });
