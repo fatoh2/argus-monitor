@@ -2,6 +2,20 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RpcMonitorController } from './rpc-monitor.controller';
 import { RpcMonitorService } from './rpc-monitor.service';
 
+// Mock @argus/shared-types and @solana/web3.js before importing RpcMonitorService's dependencies.
+jest.mock('@argus/shared-types', () => ({}));
+jest.mock('@solana/web3.js', () => ({
+  PublicKey: jest.fn().mockImplementation((address: string) => ({
+    toString: () => address,
+    toBase58: () => address,
+  })),
+  Connection: jest.fn().mockImplementation(() => ({
+    getBalance: jest.fn(),
+    getBlockHeight: jest.fn(),
+  })),
+  LAMPORTS_PER_SOL: 1_000_000_000,
+}));
+
 describe('RpcMonitorController', () => {
   let controller: RpcMonitorController;
   let service: jest.Mocked<RpcMonitorService>;
@@ -11,8 +25,8 @@ describe('RpcMonitorController', () => {
   const mockSnapshot = {
     endpoint: 'https://rpc1.solana.com',
     healthy: true,
-    latency: 150,
-    lastChecked: new Date('2024-01-01T00:00:00Z'),
+    latencyMs: 150,
+    timestamp: '2024-01-01T00:00:00.000Z',
     blockHeight: 250000000,
   };
 
