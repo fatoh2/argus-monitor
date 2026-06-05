@@ -254,6 +254,7 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+      API_PROXY_TARGET: http://api-service:3000
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
