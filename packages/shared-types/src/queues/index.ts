@@ -4,13 +4,13 @@
  */
 export const QUEUES = {
   /** Scheduled job: "check wallet X now" */
-  CHAIN_INDEXER: 'chain:indexer',
+  CHAIN_INDEXER: 'chain-indexer',
   /** Consumed by solana-adapter: fetch on-chain data */
-  SOLANA_FETCH: 'solana:fetch',
+  SOLANA_FETCH: 'solana-fetch',
   /** Consumed by alert-service: evaluate alert rules */
-  ALERT_EVALUATION: 'alert:evaluation',
+  ALERT_EVALUATION: 'alert-evaluation',
   /** Consumed by notification-service: send notifications */
-  NOTIFICATION_DISPATCH: 'notification:dispatch',
+  NOTIFICATION_DISPATCH: 'notification-dispatch',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

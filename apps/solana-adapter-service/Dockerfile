@@ -9,8 +9,8 @@ RUN yarn build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-COPY --from=builder /app/dist/apps/solana-adapter-service ./dist
+COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 EXPOSE 3002
-CMD ["node", "dist/main"]
+CMD ["node", "dist/apps/solana-adapter-service/src/main"]

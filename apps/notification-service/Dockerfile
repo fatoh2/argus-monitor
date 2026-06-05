@@ -9,8 +9,8 @@ RUN yarn build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-COPY --from=builder /app/dist/apps/notification-service ./dist
+COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 EXPOSE 3004
-CMD ["node", "dist/main"]
+CMD ["node", "dist/apps/notification-service/src/main"]

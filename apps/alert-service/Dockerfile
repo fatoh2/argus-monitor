@@ -9,8 +9,8 @@ RUN yarn build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-COPY --from=builder /app/dist/apps/alert-service ./dist
+COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 EXPOSE 3003
-CMD ["node", "dist/main"]
+CMD ["node", "dist/apps/alert-service/src/main"]
