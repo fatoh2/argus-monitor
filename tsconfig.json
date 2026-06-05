@@ -4,8 +4,12 @@
     "outDir": "./dist",
     "baseUrl": ".",
     "paths": {
-      "@argus/adapter-sdk": ["packages/adapter-sdk/src"],
-      "@argus/shared-types": ["packages/shared-types/src"]
+      "@argus/adapter-sdk": [
+        "packages/adapter-sdk/src"
+      ],
+      "@argus/shared-types": [
+        "packages/shared-types/src"
+      ]
     }
   },
   "include": [
@@ -14,6 +18,9 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "**/*.e2e-spec.ts"
   ]
 }
