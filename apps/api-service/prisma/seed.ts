@@ -60,7 +60,7 @@ async function main() {
       userId: testUser.id,
       walletId: wallets[0].id,
       chain: "SOLANA",
-      type: "large_tx",
+      type: "token_volume",
       threshold: "1000000000", // 1 SOL in lamports
     },
   });
@@ -74,8 +74,8 @@ async function main() {
       userId: testUser.id,
       walletId: wallets[1].id,
       chain: "SOLANA",
-      type: "balance_change",
-      threshold: null,
+      type: "balance_low",
+      threshold: "100000000",
     },
   });
   console.log(`  ✅ AlertRule: ${balanceChangeRule.type}`);

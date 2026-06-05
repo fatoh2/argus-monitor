@@ -1,5 +1,5 @@
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { QUEUES } from '@argus/shared-types';
 import { AlertEngineService, AlertRule, BalanceData, TransactionData } from '../alert-engine/alert-engine.service';
@@ -62,6 +62,7 @@ export class AlertConsumer extends WorkerHost {
 
   constructor(
     private readonly alertEngineService: AlertEngineService,
+    @InjectQueue(QUEUES.NOTIFICATION_DISPATCH) private readonly notificationQueue: Queue,
   ) {
     super();
   }
@@ -100,9 +101,20 @@ export class AlertConsumer extends WorkerHost {
         `Evaluation complete: ${results.length} evaluated, ${triggered.length} triggered for wallet ${walletId}`,
       );
 
-      // For triggered alerts, we would push to notification:dispatch queue
-      // This is done by the caller or via a separate queue producer
-      // For now, we return the results so the caller can dispatch
+      // Push each triggered alert to the notification-dispatch queue
+      for (const r of triggered) {
+        await this.notificationQueue.add('dispatch', {
+          alertId: r.ruleId,
+          walletId,
+          channel: 'telegram',
+          message: r.message ?? `Alert ${r.ruleType} triggered for wallet ${walletId}`,
+          ruleType: r.ruleType,
+          chain,
+        });
+      }
+      if (triggered.length > 0) {
+        this.logger.log(`Dispatched ${triggered.length} notification(s) to queue for wallet ${walletId}`);
+      }
 
       return {
         evaluated: results.length,
