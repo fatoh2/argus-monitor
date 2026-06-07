@@ -189,6 +189,8 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deploy
 ```
 
+> **Note:** Docker builds use the repository root as the build context. All services require `tsconfig.json`, `tsconfig.base.json`, and `nest-cli.json` at the root for successful TypeScript compilation. These files are included automatically when building via `docker compose build`.
+
 ## Troubleshooting
 
 ### Service fails to start
