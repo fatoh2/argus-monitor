@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json yarn.lock ./
 COPY packages/ ./packages/
 COPY apps/ ./apps/
-COPY tsconfig.base.json nest-cli.json ./
+COPY tsconfig.base.json tsconfig.json nest-cli.json ./
 RUN yarn install --frozen-lockfile
 RUN yarn build
 
