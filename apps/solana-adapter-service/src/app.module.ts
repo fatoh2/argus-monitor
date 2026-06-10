@@ -26,6 +26,7 @@ import { QUEUES } from '@argus/shared-types';
         connection: {
           host: configService.get<string>('redis.host'),
           port: configService.get<number>('redis.port'),
+          password: configService.get<string>('redis.password'),
         },
       }),
     }),
