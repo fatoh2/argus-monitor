@@ -72,7 +72,7 @@ make test-local          # full stack smoke test (health checks, type-check, uni
 The `test-local` target provides a complete end-to-end validation of the stack:
 
 1. **Reset stack** — `docker compose down -v` then starts `postgres` and `redis`
-2. **Wait for databases** — polls `pg_isready` and `redis-cli ping` (up to 60s each)
+2. **Wait for databases** — polls `pg_isready` and `redis-cli -a "$REDIS_PASSWORD" ping` (up to 60s each)
 3. **Migrations + seed** — `prisma migrate deploy` then `prisma db seed`
 4. **Start all services** — `docker compose up -d`
 5. **Health check polling** — polls all 5 services (api-service, chain-indexer, solana-adapter, alert-service, notification) on their health endpoints
@@ -310,7 +310,7 @@ VITE_E2E_TEST=true npx playwright test
 ### Backend CI (`.github/workflows/test.yml`)
 
 Runs on every PR to `develop` or `main`:
-1. Spins up PostgreSQL 16 + Redis 7 service containers
+1. Spins up PostgreSQL 16 + Redis 7 service containers (password-protected, localhost-only)
 2. Installs deps, generates Prisma client, runs migrations
 3. TypeScript check (`tsc --noEmit`)
 4. Lint check

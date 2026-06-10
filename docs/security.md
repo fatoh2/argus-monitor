@@ -136,3 +136,65 @@ Auth rate limiting is validated by an integration test (`apps/api-service/src/au
 - Prisma errors mapped to proper HTTP status codes (`P2002` → 409, `P2025` → 404, `P2003` → 400, others → 500)
 - All errors logged with HTTP status and request URL
 - Extends `BaseExceptionFilter` from `@nestjs/core`, registered via `HttpAdapterHost`
+
+## Redis Security
+
+Argus Monitor uses Redis for BullMQ job queues and caching. The Redis instance is secured as follows:
+
+### Localhost Binding
+
+Redis is configured to bind only to `127.0.0.1:6379` (localhost), not `0.0.0.0:6379`. This means Redis is **not accessible from outside the Docker host** — only other containers on the same Docker network can reach it. This prevents external network scanning and unauthorized remote access.
+
+```yaml
+# docker-compose.yml
+ports:
+  - "127.0.0.1:6379:6379"
+```
+
+### Password Authentication
+
+Redis requires a password for all connections. The password is set via the `REDIS_PASSWORD` environment variable:
+
+```yaml
+# docker-compose.yml
+command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-argus-redis-local}"]
+```
+
+**Default:** `argus-redis-local` (development only — **must be changed in production**).
+
+### Healthcheck with Password
+
+The Redis healthcheck passes the password via the `-a` flag:
+
+```yaml
+healthcheck:
+  test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-argus-redis-local}", "ping"]
+```
+
+### BullMQ Connections
+
+All three BullMQ queue consumers pass the `REDIS_PASSWORD` to their Redis connection configuration:
+
+| Service | Source of `password` |
+|---|---|
+| `solana-adapter-service` | `ConfigService` (reads `.env`) |
+| `notification-service` | `process.env.REDIS_PASSWORD` |
+| `alert-service` | `process.env.REDIS_PASSWORD` |
+
+If `REDIS_PASSWORD` is not set, the password field defaults to `undefined`, which means Redis will reject the connection (since `--requirepass` is always set).
+
+### Verifying Redis Security
+
+```bash
+# Confirm Redis is not publicly accessible
+ss -tlnp | grep 6379
+# Should show: 127.0.0.1:6379 (not 0.0.0.0:6379)
+
+# Confirm Redis requires authentication
+redis-cli -p 6379 ping
+# Should return: (error) NOAUTH Authentication required.
+
+# Confirm password works
+redis-cli -p 6379 -a "$REDIS_PASSWORD" ping
+# Should return: PONG
+```

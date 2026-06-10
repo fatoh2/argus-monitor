@@ -35,7 +35,7 @@ See the [README](../README.md#development) for the full command reference.
 The `test-local` target validates the entire stack end-to-end:
 
 1. **Reset stack** — `docker compose down -v` then starts `postgres` and `redis`
-2. **Wait for databases** — polls `pg_isready` and `redis-cli ping` (up to 60s each)
+2. **Wait for databases** — polls `pg_isready` and `redis-cli -a "$REDIS_PASSWORD" ping` (up to 60s each)
 3. **Migrations + seed** — `prisma migrate deploy` then `prisma db seed`
 4. **Start all services** — `docker compose up -d`
 5. **Health check polling** — polls all 5 services (api-service, chain-indexer, solana-adapter, alert-service, notification)
@@ -119,6 +119,7 @@ Argus Monitor consists of a React frontend, six NestJS microservices, a shared `
 - **Secret Redaction**: A `redact()` utility (`apps/api-service/src/common/logger/redact.ts`) automatically masks passwords, tokens, API keys, and PII before they reach log output. The global exception filter redacts request bodies and query params on 5xx errors. A linting test (`log-secrets-lint.spec.ts`) enforces that no log call references a secret environment variable. All services use NestJS `Logger` instead of `console.log`.
 - **Reverse proxy**: The API service and frontend should only be accessible via a reverse proxy (nginx, Caddy) with SSL termination. Do not expose services directly to the public internet.
 - **Strong passwords**: Use strong, random passwords for PostgreSQL, Redis, and JWT secrets.
+- **Redis security**: Redis is configured to bind only to `127.0.0.1` (localhost) and requires a password (`REDIS_PASSWORD`) for all connections. This prevents external network access and ensures only local services can connect. Change the default password in production.
 - **BullMQ Dashboard**: If used, protect it behind a reverse proxy with authentication.
 - **Global exception filter + Prisma error handling**: In production, the API service returns only `{statusCode, message}` — no stack traces, timestamp, or path. In development, responses include `timestamp`, `path`, and `stack` for debugging. The filter extends `BaseExceptionFilter` from `@nestjs/core` and is registered via `HttpAdapterHost`. All errors are logged server-side with HTTP status and request URL. Prisma errors are mapped to proper HTTP codes (P2002 → 409 Conflict, P2025 → 404 Not Found, P2003 → 400 Bad Request, others → 500) both at the global filter level and per-method via the shared `handlePrismaError()` utility (`apps/api-service/src/common/prisma-error.handler.ts`).
 - **Rate limiting**: All API endpoints are rate-limited to prevent abuse. Auth endpoints have a stricter limit (10 req/60s) to mitigate brute-force attacks. The health endpoint is exempt to allow monitoring tools uninterrupted access. Auth rate limiting is validated by an integration test (`auth.controller.spec.ts`) that proves the `@Throttle()` decorator enforces the 10-request cap through the full NestJS HTTP pipeline.
@@ -211,7 +212,7 @@ docker compose exec postgres pg_isready -U argus -d argus
 
 Verify Redis is healthy:
 ```bash
-docker compose exec redis redis-cli ping
+docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
 # Should respond: PONG
 ```
 

@@ -73,7 +73,7 @@ psql: ## Open psql shell in postgres (requires running containers)
 	docker compose exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
 redis-cli: ## Open redis-cli in redis (requires running containers)
-	docker compose exec redis redis-cli
+	docker compose exec redis redis-cli -a "$(REDIS_PASSWORD)"
 
 reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), seed, start all
 	docker compose down -v
@@ -99,7 +99,7 @@ reset: ## Full reset: down -v, start infra, wait for healthy, migrate (deploy), 
 	@echo "Waiting for redis to be healthy..."
 	@sleep 2
 	@for i in $$(seq 1 30); do \
-		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
+		if docker compose exec -T redis redis-cli -a "$(REDIS_PASSWORD)" ping >/dev/null 2>&1; then \
 			echo "Redis is healthy!"; \
 			break; \
 		fi; \
@@ -144,7 +144,7 @@ test-local: ## Full stack smoke test: reset stack, migrate, seed, health checks,
 	done
 	@sleep 2
 	@for i in $$(seq 1 30); do \
-		if docker compose exec -T redis redis-cli ping >/dev/null 2>&1; then \
+		if docker compose exec -T redis redis-cli -a "$(REDIS_PASSWORD)" ping >/dev/null 2>&1; then \
 			echo "  ✅ redis is healthy!"; \
 			break; \
 		fi; \
