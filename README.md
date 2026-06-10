@@ -53,6 +53,8 @@ This checks prerequisites (Node.js >= 18, Docker running), installs npm dependen
 | `make psql` | Open psql shell in postgres (requires running containers) |
 | `make redis-cli` | Open redis-cli in redis (requires running containers) |
 | `make reset` | Full reset: down -v, start infra, migrate, seed, start all |
+| `make e2e-setup` | Install Playwright browsers (chromium) for E2E tests |
+| `make e2e` | Run Playwright E2E tests (requires stack running — `make up`) |
 | `bash scripts/setup.sh` | One-command local dev setup (prerequisites check, deps install, .env, migrations) |
 
 ### Quick Start
@@ -135,7 +137,15 @@ The frontend expects the API service at `http://localhost:3000` (configurable vi
 
 ### E2E Tests
 
-Playwright E2E tests are located in `apps/frontend/e2e/`:
+Playwright E2E tests are located in `apps/frontend/e2e/`. Use the Makefile targets for convenience:
+
+```bash
+make e2e-setup          # install Playwright Chromium browser (one-time)
+make up                 # start the full stack
+make e2e                # run Playwright E2E tests against the running stack
+```
+
+Or run manually:
 
 ```bash
 cd apps/frontend
@@ -267,6 +277,16 @@ make test-local-e2e   # full stack smoke test + e2e tests
 ```
 
 ### Frontend E2E Tests
+
+Use the Makefile targets (see [E2E Tests](#e2e-tests) above):
+
+```bash
+make e2e-setup          # install Playwright Chromium browser (one-time)
+make up                 # start the full stack
+make e2e                # run Playwright E2E tests against the running stack
+```
+
+Or run manually:
 
 ```bash
 cd apps/frontend

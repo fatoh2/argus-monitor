@@ -78,6 +78,15 @@ The frontend at `apps/frontend/jest.config.cjs` prevents Jest from picking up Pl
 - Playwright E2E tests in `apps/frontend/e2e/` are run separately via `npx playwright test`
 
 ### Running Frontend E2E Tests
+
+```bash
+make e2e-setup          # install Playwright Chromium browser (one-time)
+make up                 # start the full stack
+make e2e                # run Playwright E2E tests against the running stack
+```
+
+Or run manually:
+
 ```bash
 cd apps/frontend
 npm install
@@ -128,6 +137,8 @@ VITE_E2E_TEST=true npx playwright test
 | `make psql` | Open psql shell in postgres |
 | `make redis-cli` | Open redis-cli in redis |
 | `make reset` | Full reset: down -v, start infra, migrate, seed, start all |
+| `make e2e-setup` | Install Playwright browsers (chromium) for E2E tests |
+| `make e2e` | Run Playwright E2E tests (requires stack running) |
 
 ## Verification Before Push
 

@@ -23,6 +23,8 @@ make test        # run all workspace tests
 make test-local  # full stack smoke test (reset, health checks, type-check, tests)
 make logs        # tail container logs
 make reset       # full reset: down -v, migrate, seed, start all
+make e2e-setup  # install Playwright browsers (chromium) for E2E tests
+make e2e        # run Playwright E2E tests (requires stack running)
 make help        # show all available commands
 ```
 
@@ -186,6 +188,8 @@ docker compose -f docker-compose.prod.yml build --pull
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml run --rm api-service npx prisma migrate deploy
 ```
+
+> **Note:** Docker builds use the repository root as the build context. All services require `tsconfig.json`, `tsconfig.base.json`, and `nest-cli.json` at the root for successful TypeScript compilation. These files are included automatically when building via `docker compose build`.
 
 ## Troubleshooting
 
