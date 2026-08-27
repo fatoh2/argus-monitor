@@ -2,6 +2,8 @@
 
 Argus Monitor is a blockchain monitoring SaaS application. It allows users to set up monitors for various blockchain events and receive notifications.
 
+[View the portfolio case study](https://fhaj.vercel.app/work/argus-monitor)
+
 ## Features
 
 - **React Frontend** — Vite + React 18 + TypeScript + Tailwind CSS with auth pages (Login, Register), wallet dashboard with balances and transactions, and alert rules management
